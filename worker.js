@@ -5,11 +5,39 @@ export default {
     const cookieName = 'uvc_session';
     const sign = async (value) => { const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(env.SESSION_SECRET), {name:'HMAC',hash:'SHA-256'}, false, ['sign']); const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(value)); return btoa(String.fromCharCode(...new Uint8Array(sig))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''); };
     const validSession = async () => { if (!env.SESSION_SECRET) return false; const rawCookie=request.headers.get('Cookie')||''; const match=rawCookie.split(';').map(x=>x.trim()).find(x=>x.startsWith(cookieName+'=')); if(!match)return false; const parts=match.slice(cookieName.length+1).split('.'); if(parts.length!==2||!/^\d+$/.test(parts[0]))return false; const expiry=Number(parts[0]); if(expiry<Math.floor(Date.now()/1000)||expiry>Math.floor(Date.now()/1000)+86400*8)return false; return parts[1]===await sign(parts[0]); };
-    if (url.pathname === '/api/login' && request.method === 'POST') { let body; try { body=await request.json(); } catch { return json({ok:false,message:'Preencha os dados de acesso.'},400); } if(!body.username || !body.password) return json({ok:false,message:'Preencha usuário e senha.'},400); return json({ok:true}); }
-    if (url.pathname === '/api/logout' && request.method === 'POST') return json({ok:true});
-    if (url.pathname === '/api/session') return json({authenticated:true});
-    
-
+    const clearCookie = 'uvc_session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0';
+    const authUnavailable = () => json({ok:false,message:'Autenticação não configurada. Configure ADMIN_USERNAME, ADMIN_PASSWORD e SESSION_SECRET em Variáveis e segredos.'},503);
+    const isSafeEqual = (a,b) => {
+      const aa = new TextEncoder().encode(String(a));
+      const bb = new TextEncoder().encode(String(b));
+      if (aa.length !== bb.length) return false;
+      let diff = 0; for (let i=0;i<aa.length;i++) diff |= aa[i] ^ bb[i];
+      return diff === 0;
+    };
+    if (url.pathname === '/api/login' && request.method === 'POST') {
+      if (!env.ADMIN_USERNAME || !env.ADMIN_PASSWORD || !env.SESSION_SECRET) return authUnavailable();
+      let body;
+      try { body = await request.json(); } catch { return json({ok:false,message:'Preencha usuário e senha.'},400); }
+      if (typeof body.username !== 'string' || typeof body.password !== 'string' || !isSafeEqual(body.username,env.ADMIN_USERNAME) || !isSafeEqual(body.password,env.ADMIN_PASSWORD)) {
+        return json({ok:false,message:'Usuário ou senha inválidos.'},401,{'set-cookie':clearCookie});
+      }
+      const expires = Math.floor(Date.now()/1000) + 86400;
+      const signature = await sign(String(expires));
+      const cookie = 'uvc_session=' + expires + '.' + signature + '; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=86400';
+      return json({ok:true},200,{'set-cookie':cookie});
+    }
+    if (url.pathname === '/api/logout' && request.method === 'POST') {
+      return json({ok:true},200,{'set-cookie':clearCookie});
+    }
+    if (url.pathname === '/api/session') {
+      return json({authenticated:await validSession()});
+    }
+    // Protect the app and product endpoints behind a valid signed session.
+    const publicPaths = new Set(['/','/login','/api/login','/api/logout','/api/session']);
+    if (!publicPaths.has(url.pathname) && !await validSession()) {
+      if (url.pathname.startsWith('/api/')) return json({ok:false,message:'Não autenticado.'},401);
+      return Response.redirect(new URL('/login?next=' + encodeURIComponent(url.pathname + url.search), request.url),302);
+    }
     if (url.pathname === '/api/products/trending' && request.method === 'GET') {
       if (!env.KALODATA_API_KEY) return json({ok:false,source:'Kalodata',message:'A chave da API da Kalodata não está configurada no Worker.'},503);
       const allowedRanges=['lastDay','last7Day','last30Day'];
