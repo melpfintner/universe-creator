@@ -32,6 +32,12 @@ export default {
     if (url.pathname === '/api/session') {
       return json({authenticated:await validSession()});
     }
+    // Protect the app and product endpoints behind a valid signed session.
+    const publicPaths = new Set(['/','/login','/api/login','/api/logout','/api/session']);
+    if (!publicPaths.has(url.pathname) && !await validSession()) {
+      if (url.pathname.startsWith('/api/')) return json({ok:false,message:'Não autenticado.'},401);
+      return Response.redirect(new URL('/login?next=' + encodeURIComponent(url.pathname + url.search), request.url),302);
+    }
     if (url.pathname === '/api/products/trending' && request.method === 'GET') {
       if (!env.KALODATA_API_KEY) return json({ok:false,source:'Kalodata',message:'A chave da API da Kalodata não está configurada no Worker.'},503);
       const allowedRanges=['lastDay','last7Day','last30Day'];
