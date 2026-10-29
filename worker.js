@@ -196,7 +196,7 @@ const setStatus=(message,isError=false)=>{const node=document.getElementById("re
 const openInfluencerDb=()=>new Promise((resolve,reject)=>{const req=indexedDB.open("uvc-influencers",1);req.onupgradeneeded=()=>{if(!req.result.objectStoreNames.contains("items"))req.result.createObjectStore("items",{keyPath:"id"});};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);});
 document.getElementById("createForm").addEventListener("submit",async e=>{
   e.preventDefault();
-  const referenceFile=selectedReferenceFile||(file.files&&file.files[0]);
+  const referenceFile=selectedReferenceFile||(file.files&&file.files[0])||(typeof currentFile!=="undefined"?currentFile:null);
   if(!document.getElementById("prompt").reportValidity())return;
   if(!referenceFile){status.textContent="Adicione uma foto de referência antes de gerar.";drop.focus();return;}
   const prompt=document.getElementById("prompt").value.trim();
