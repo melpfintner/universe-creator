@@ -94,7 +94,7 @@ export default {
           }
           return '';
         };
-        title = meta('og:title') || meta('twitter:title') || ((html.match(/<title[^>]*>([\s\S]*?)<\\/title>/i)||[])[1]||'').replace(/<[^>]+>/g,' ').trim();
+        title = meta('og:title') || meta('twitter:title') || ((html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)||[])[1]||'').replace(/<[^>]+>/g,' ').trim();
         description = meta('og:description') || meta('description') || meta('twitter:description');
         imageUrl = meta('og:image') || meta('twitter:image');
         if (imageUrl) { try { imageUrl = new URL(imageUrl,pageUrl).href; if (!['http:','https:'].includes(new URL(imageUrl).protocol)) imageUrl=''; } catch { imageUrl=''; } }
