@@ -85,32 +85,28 @@ export default {
       if (!['image/jpeg','image/png','image/webp'].includes(reference.type)) return json({ok:false,message:'Formato não suportado. Use JPG, PNG ou WEBP.'},415);
       if (reference.size < 1 || reference.size > 5 * 1024 * 1024) return json({ok:false,message:'A foto deve ter até 5 MB.'},413);
       try {
-        const bytes = new Uint8Array(await reference.arrayBuffer());
-        let binary = '';
-        for (let offset = 0; offset < bytes.length; offset += 0x8000) {
-          binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + 0x8000, bytes.length)));
-        }
-        const imageBase64 = btoa(binary);
-        const fullPrompt = prompt + '\n\nUse a imagem enviada como referência visual principal. Preserve a identidade e os traços reconhecíveis da pessoa adulta, incluindo formato do rosto, olhos, nariz, boca, tom de pele e cabelo, a menos que o prompt peça explicitamente uma mudança. Gere uma imagem fotorrealista, anatomia natural, mãos corretas, sem texto, sem marca d\'água e sem colagem.';
-        const generated = await env.AI.run('@cf/runwayml/stable-diffusion-v1-5-img2img', {
-          prompt: fullPrompt,
-          image_b64: imageBase64,
-          strength: 0.55,
-          num_steps: 20,
-          guidance: 7.5,
-          width: 768,
-          height: 1024
+        const fullPrompt = prompt + '\n\nUse a imagem de referência enviada como base principal. Siga fielmente as características e instruções descritas no prompt. Preserve a identidade facial reconhecível da pessoa adulta da referência, incluindo formato do rosto, olhos, nariz, boca, tom de pele e cabelo, salvo quando o prompt pedir explicitamente uma alteração. Priorize fotorrealismo, textura natural da pele com poros, cabelo e mãos anatomicamente corretos, iluminação e proporções realistas. Sem texto, marca-d\'água ou colagem.';
+        const aiForm = new FormData();
+        aiForm.append('prompt', fullPrompt);
+        aiForm.append('input_image_0', new Blob([await reference.arrayBuffer()], {type:reference.type}), 'referencia.png');
+        aiForm.append('width', '768');
+        aiForm.append('height', '1024');
+        const aiRequest = new Request('https://workers-ai.internal/run', {method:'POST', body:aiForm});
+        const generated = await env.AI.run('@cf/black-forest-labs/flux-2-klein-4b', {
+          multipart: { body: aiRequest.body, contentType: aiRequest.headers.get('content-type') }
         });
+        if (generated && typeof generated.image === 'string') {
+          const encoded = generated.image.replace(/^data:image\/[^;]+;base64,/, '');
+          const decoded = Uint8Array.from(atob(encoded), ch => ch.charCodeAt(0));
+          return new Response(decoded, {status:200,headers:{'content-type':'image/png','cache-control':'no-store','x-content-type-options':'nosniff'}});
+        }
         if (generated instanceof ReadableStream) {
           return new Response(generated, {status:200,headers:{'content-type':'image/png','cache-control':'no-store','x-content-type-options':'nosniff'}});
         }
         if (generated instanceof Uint8Array || generated instanceof ArrayBuffer) {
           return new Response(generated, {status:200,headers:{'content-type':'image/png','cache-control':'no-store','x-content-type-options':'nosniff'}});
         }
-        if (generated && generated.image instanceof ReadableStream) {
-          return new Response(generated.image, {status:200,headers:{'content-type':'image/png','cache-control':'no-store','x-content-type-options':'nosniff'}});
-        }
-        return json({ok:false,message:'O serviço de imagem respondeu em um formato inesperado. Tente novamente.'},502);
+        return json({ok:false,message:'O gerador não devolveu uma imagem válida. Tente novamente.'},502);
       } catch (error) {
         const message = String(error && error.message || '');
         if (/quota|limit|billing|neuron|exceed/i.test(message)) {
@@ -206,7 +202,7 @@ document.getElementById("createForm").addEventListener("submit",async e=>{
   submit.disabled=true;submit.textContent="Gerando influencer…";status.textContent="Enviando a foto e o prompt ao gerador de imagens gratuito do Cloudflare. Isso pode levar alguns instantes.";
   const loading=document.createElement("p");loading.textContent="Criando sua influencer a partir da referência…";art.appendChild(loading);
   try{
-    const formData=new FormData();formData.append("reference",referenceFile,referenceFile.name||"referencia.png");formData.append("prompt",prompt);
+    const bitmap=await createImageBitmap(referenceFile);const scale=Math.min(1,512/Math.max(bitmap.width,bitmap.height));const canvas=document.createElement("canvas");canvas.width=Math.max(64,Math.round(bitmap.width*scale));canvas.height=Math.max(64,Math.round(bitmap.height*scale));const ctx=canvas.getContext("2d");ctx.drawImage(bitmap,0,0,canvas.width,canvas.height);if(bitmap.close)bitmap.close();const resizedReference=await new Promise((resolve,reject)=>canvas.toBlob(blob=>blob?resolve(blob):reject(new Error("Não foi possível preparar a foto de referência.")),"image/png"));const formData=new FormData();formData.append("reference",resizedReference,"referencia.png");formData.append("prompt",prompt);
     const response=await fetch("/api/influencers/generate",{method:"POST",body:formData,credentials:"same-origin",cache:"no-store"});
     const type=response.headers.get("content-type")||"";
     if(!response.ok||!type.startsWith("image/")){
