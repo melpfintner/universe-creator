@@ -115,7 +115,7 @@ export default {
       } catch { return json({ok:false,message:'Não foi possível alcançar o motor próprio de vídeo. Verifique se o serviço open-source está em execução.'},502); }
     }
     if (url.pathname === '/api/videos/link/status' && request.method === 'GET') {
-      if (!env.VIDEO_ENGINE_URL) return json({ok:false,message:'O motor próprio de vídeo ainda não está conectado. O motor próprio de vídeo ainda não está instalado/conectado.'},503);
+      if (!env.VIDEO_ENGINE_URL) return json({ok:false,message:'O motor próprio de vídeo ainda não está instalado/conectado.'},503);
       const taskId = url.searchParams.get('taskId') || '';
       if (!/^[-_a-zA-Z0-9]{6,160}$/.test(taskId)) return json({ok:false,message:'Identificador de geração inválido.'},400);
       try {
