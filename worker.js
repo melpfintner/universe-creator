@@ -86,12 +86,12 @@ export default {
         if (!type.includes('text/html')) return json({ok:false,message:'O link não abriu uma página de produto legível. Cole o link da página do produto, não um link de checkout.'},422);
         const html = (await page.text()).slice(0,1500000);
         const meta = (key) => {
-          const escaped = key;
-          const patterns = [
-            new RegExp('<meta[^>]+(?:property|name)=["\\']'+escaped+'["\\'][^>]+content=["\\']([^"\\']*)["\\'][^>]*>','i'),
-            new RegExp('<meta[^>]+content=["\\']([^"\\']*)["\\'][^>]+(?:property|name)=["\\']'+escaped+'["\\'][^>]*>','i')
-          ];
-          for (const re of patterns) { const m=html.match(re); if(m) return m[1].replace(/&amp;/g,'&').replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>').trim(); }
+          const tags = html.match(/<meta\b[^>]*>/gi) || [];
+          for (const tag of tags) {
+            const attrs = {};
+            tag.replace(/([^\s=]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/g, (_, name, doubleQuoted, singleQuoted, unquoted) => { attrs[name.toLowerCase()] = doubleQuoted ?? singleQuoted ?? unquoted ?? ''; return ''; });
+            if (String(attrs.property || attrs.name || '').toLowerCase() === key.toLowerCase()) return String(attrs.content || '').replace(/&amp;/g,'&').replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>').trim();
+          }
           return '';
         };
         title = meta('og:title') || meta('twitter:title') || ((html.match(/<title[^>]*>([\s\S]*?)<\\/title>/i)||[])[1]||'').replace(/<[^>]+>/g,' ').trim();
