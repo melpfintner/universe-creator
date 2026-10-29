@@ -1,0 +1,10 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "universe-creator-interface",
+  "main": "worker.js",
+  "compatibility_date": "2026-10-29",
+  "previews": {},
+  "ai": {
+    "binding": "AI"
+  }
+}
