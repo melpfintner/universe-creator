@@ -3,7 +3,11 @@
   "name": "universe-creator-interface",
   "main": "worker.js",
   "compatibility_date": "2026-10-29",
-  "previews": {},
+  "previews": {
+    "ai": {
+      "binding": "AI"
+    }
+  },
   "ai": {
     "binding": "AI"
   }
