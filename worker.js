@@ -86,7 +86,7 @@ export default {
         if (!type.includes('text/html')) return json({ok:false,message:'O link não abriu uma página de produto legível. Cole o link da página do produto, não um link de checkout.'},422);
         const html = (await page.text()).slice(0,1500000);
         const meta = (key) => {
-          const escaped = key.replace(/[.*+?^{}()|[\]\\]/g,'\\    if (url.pathname === '/api/influencers/generate' && request.method === 'POST') {');
+          const escaped = key;
           const patterns = [
             new RegExp('<meta[^>]+(?:property|name)=["\\']'+escaped+'["\\'][^>]+content=["\\']([^"\\']*)["\\'][^>]*>','i'),
             new RegExp('<meta[^>]+content=["\\']([^"\\']*)["\\'][^>]+(?:property|name)=["\\']'+escaped+'["\\'][^>]*>','i')
