@@ -3,10 +3,5 @@ name = "universe-creator-interface"
 main = "worker.js"
 compatibility_date = "2026-11-02"
 
-[assets]
-directory = "./dist"
-binding = "ASSETS"
-run_worker_first = ["/", "/login", "/app/*", "/api/*"]
-
 [ai]
 binding = "AI"
