@@ -1,13 +1,12 @@
 #:schema node_modules/wrangler/config-schema.json
 name = "universe-creator-interface"
+main = "worker.js"
 compatibility_date = "2026-11-02"
 
-# Define que o Cloudflare deve servir a pasta de build gerada pelo Vite
 [assets]
 directory = "./dist"
 binding = "ASSETS"
+run_worker_first = ["/", "/login", "/app/*", "/api/*"]
 
-# Configuração para que todas as rotas do painel lateral funcionem sem erro 404 ao atualizar a página
-[site]
-bucket = "./dist"
-entry-point = "workers-site"
+[ai]
+binding = "AI"
