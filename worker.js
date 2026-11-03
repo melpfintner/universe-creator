@@ -246,49 +246,38 @@ export default {
         return json({ok:true,status:data.status||'processing'});
       } catch { return json({ok:false,message:'Falha ao consultar o status do vídeo.'},502); }
     }
+    // Ponte do Módulo 1: recebe multipart do frontend e encaminha JSON ao Colab.
     if (url.pathname === '/api/influencers/generate' && request.method === 'POST') {
-      if (!env.AI || typeof env.AI.run !== 'function') {
-        return json({ok:false,message:'A geração ainda não está conectada. Configure a associação Workers AI com o nome AI neste Worker.'},503);
-      }
+      if (!env.COLAB_MODULE1_URL) return json({ok:false,message:'Configure COLAB_MODULE1_URL no Cloudflare para conectar o Módulo 1.'},503);
       let form;
       try { form = await request.formData(); }
-      catch { return json({ok:false,message:'Não foi possível ler a foto enviada. Tente selecionar a imagem novamente.'},400); }
+      catch { return json({ok:false,message:'Não foi possível ler a foto enviada. Selecione a imagem novamente.'},400); }
       const prompt = String(form.get('prompt') || '').trim();
       const reference = form.get('reference');
-      if (!prompt || prompt.length < 8) return json({ok:false,message:'Descreva a influencer com pelo menos 8 caracteres.'},400);
-      if (prompt.length > 3000) return json({ok:false,message:'O prompt deve ter no máximo 3.000 caracteres.'},413);
-      if (!(reference instanceof File)) return json({ok:false,message:'Envie uma foto de referência para criar a influencer.'},400);
+      if (prompt.length < 8) return json({ok:false,message:'Descreva a influencer com pelo menos 8 caracteres.'},400);
+      if (prompt.length > 5000) return json({ok:false,message:'O prompt deve ter no máximo 5.000 caracteres.'},413);
+      if (!(reference instanceof File)) return json({ok:false,message:'Envie uma foto de referência para criar a identidade.'},400);
       if (!['image/jpeg','image/png','image/webp'].includes(reference.type)) return json({ok:false,message:'Formato não suportado. Use JPG, PNG ou WEBP.'},415);
       if (reference.size < 1 || reference.size > 5 * 1024 * 1024) return json({ok:false,message:'A foto deve ter até 5 MB.'},413);
       try {
-        const fullPrompt = prompt + '\n\nUse a imagem de referência enviada como base principal. Siga fielmente as características e instruções descritas no prompt. Preserve a identidade facial reconhecível da pessoa adulta da referência, incluindo formato do rosto, olhos, nariz, boca, tom de pele e cabelo, salvo quando o prompt pedir explicitamente uma alteração. Priorize fotorrealismo, textura natural da pele com poros, cabelo e mãos anatomicamente corretos, iluminação e proporções realistas. Sem texto, marca-d\'água ou colagem.';
-        const aiForm = new FormData();
-        aiForm.append('prompt', fullPrompt);
-        aiForm.append('input_image_0', new Blob([await reference.arrayBuffer()], {type:reference.type}), 'referencia.png');
-        aiForm.append('width', '768');
-        aiForm.append('height', '1024');
-        const aiRequest = new Request('https://workers-ai.internal/run', {method:'POST', body:aiForm});
-        const generated = await env.AI.run('@cf/black-forest-labs/flux-2-klein-4b', {
-          multipart: { body: aiRequest.body, contentType: aiRequest.headers.get('content-type') }
-        });
-        if (generated && typeof generated.image === 'string') {
-          const encoded = generated.image.replace(/^data:image\/[^;]+;base64,/, '');
-          const decoded = Uint8Array.from(atob(encoded), ch => ch.charCodeAt(0));
-          return new Response(decoded, {status:200,headers:{'content-type':'image/png','cache-control':'no-store','x-content-type-options':'nosniff'}});
-        }
-        if (generated instanceof ReadableStream) {
-          return new Response(generated, {status:200,headers:{'content-type':'image/png','cache-control':'no-store','x-content-type-options':'nosniff'}});
-        }
-        if (generated instanceof Uint8Array || generated instanceof ArrayBuffer) {
-          return new Response(generated, {status:200,headers:{'content-type':'image/png','cache-control':'no-store','x-content-type-options':'nosniff'}});
-        }
-        return json({ok:false,message:'O gerador não devolveu uma imagem válida. Tente novamente.'},502);
+        const bytes = new Uint8Array(await reference.arrayBuffer());
+        let binary = '';
+        const chunkSize = 0x8000;
+        for (let i=0;i<bytes.length;i+=chunkSize) binary += String.fromCharCode(...bytes.subarray(i, i+chunkSize));
+        const referenceImage = 'data:'+(reference.type || 'image/png')+';base64,'+btoa(binary);
+        const mode = url.pathname.endsWith('/identity') ? 'my_identity' : 'influencer';
+        const payload = {module:1,action:'create_identity',mode,name:String(form.get('name') || '').trim().slice(0,100),prompt,referenceImage};
+        const headers = {'content-type':'application/json','accept':'application/json'};
+        if (env.COLAB_API_TOKEN) headers.authorization = 'Bearer '+env.COLAB_API_TOKEN;
+        const endpoint = normalizeColabEndpoint(env.COLAB_MODULE1_URL);
+        const upstream = await fetch(endpoint,{method:'POST',headers,body:JSON.stringify(payload),signal:AbortSignal.timeout(90000)});
+        const result = await upstream.json().catch(()=>({}));
+        if (!upstream.ok) return json({ok:false,message:String(result.message || result.error || 'O Colab recusou a criação da identidade.').slice(0,300)},502);
+        const identityId = String(result.identityId || result.id || '').trim();
+        if (!/^[A-Za-z0-9_-]{8,128}$/.test(identityId)) return json({ok:false,message:'O Colab respondeu, mas não devolveu um identityId válido.'},502);
+        return json({ok:true,identityId,status:result.status || 'success',message:result.message || 'Identidade registrada com sucesso.',mode},200,{'set-cookie':await identityCookie(identityId)});
       } catch (error) {
-        const message = String(error && error.message || '');
-        if (/quota|limit|billing|neuron|exceed/i.test(message)) {
-          return json({ok:false,message:'O limite gratuito diário de geração pode ter sido atingido. Tente novamente após a renovação do limite.'},429);
-        }
-        return json({ok:false,message:'Não foi possível gerar a influencer. Verifique a associação Workers AI e tente novamente.'},502);
+        return json({ok:false,message:String(error && error.message || '').includes('HTTPS') ? 'O endpoint do Colab precisa usar HTTPS.' : 'Não foi possível conectar ao Colab. Verifique se o notebook do Módulo 1 está ativo.'},502);
       }
     }
     if (url.pathname === '/api/products/trending' && request.method === 'GET') {
@@ -381,16 +370,12 @@ document.getElementById("createForm").addEventListener("submit",async e=>{
     const bitmap=await createImageBitmap(referenceFile);const scale=Math.min(1,512/Math.max(bitmap.width,bitmap.height));const canvas=document.createElement("canvas");canvas.width=Math.max(64,Math.round(bitmap.width*scale));canvas.height=Math.max(64,Math.round(bitmap.height*scale));const ctx=canvas.getContext("2d");ctx.drawImage(bitmap,0,0,canvas.width,canvas.height);if(bitmap.close)bitmap.close();const resizedReference=await new Promise((resolve,reject)=>canvas.toBlob(blob=>blob?resolve(blob):reject(new Error("Não foi possível preparar a foto de referência.")),"image/png"));const formData=new FormData();formData.append("reference",resizedReference,"referencia.png");formData.append("prompt",prompt);
     const response=await fetch("/api/influencers/generate",{method:"POST",body:formData,credentials:"same-origin",cache:"no-store"});
     const type=response.headers.get("content-type")||"";
-    if(!response.ok||!type.startsWith("image/")){
-      let data={};try{data=await response.json();}catch{}
-      throw new Error(data.message||"A geração não foi concluída. Tente novamente.");
-    }
-    generatedBlob=await response.blob();if(!generatedBlob.size)throw new Error("O gerador retornou uma imagem vazia.");
-    if(generatedUrl)URL.revokeObjectURL(generatedUrl);generatedUrl=URL.createObjectURL(generatedBlob);
-    art.replaceChildren();const img=document.createElement("img");img.src=generatedUrl;img.alt="Influencer gerada a partir da foto de referência e do prompt";img.style.cssText="display:block;max-width:100%;max-height:680px;object-fit:contain;border-radius:12px;margin:auto";art.appendChild(img);
-    document.getElementById("download").disabled=false;document.getElementById("saveInfluencer").disabled=false;
-    status.textContent="Imagem gerada com sucesso. Você pode baixar ou guardar a influencer neste navegador.";
-    setStatus("Imagem gerada pelo modelo de imagem do Cloudflare Workers AI. Confira o resultado, pois a semelhança e os detalhes podem variar.");
+    const data=type.includes("application/json")?await response.json():null;
+    if(!response.ok||!data||data.ok!==true||!data.identityId)throw new Error(data&&data.message||"A identidade não foi registrada. Tente novamente.");
+    window.__uvcIdentityId=data.identityId;
+    status.textContent="Identidade registrada com sucesso. A geração da imagem será feita pelo Módulo 2.";
+    art.replaceChildren();const confirmation=document.createElement("p");confirmation.textContent="Identidade salva. ID: "+data.identityId;art.appendChild(confirmation);
+    setStatus(data.message||"Identidade registrada e vinculada à sua sessão. Ela estará disponível para o Módulo 2.");
   }catch(err){art.replaceChildren();const note=document.createElement("p");note.textContent=err.message||"Não foi possível gerar a influencer.";art.appendChild(note);setStatus(note.textContent,true);status.textContent="Nenhuma imagem foi criada nesta tentativa.";}
   finally{submit.disabled=false;submit.textContent=location.pathname.endsWith("/identity")?"Gerar minha identidade":"Gerar influencer";}
 });
