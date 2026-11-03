@@ -1,11 +1,35 @@
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    const json = (data, status=200, headers={}) => new Response(JSON.stringify(data), {status, headers:{'content-type':'application/json; charset=UTF-8','cache-control':'no-store',...headers}});
+    const allowedOrigin = String(env.APP_ORIGIN || url.origin).replace(/\/$/, '');
+    const requestOrigin = request.headers.get('Origin') || '';
+    const corsHeaders = () => {
+      const headers = {'vary':'Origin','access-control-allow-methods':'GET, POST, OPTIONS','access-control-allow-headers':'Content-Type, Authorization','access-control-max-age':'86400'};
+      if (requestOrigin && requestOrigin === allowedOrigin) {
+        headers['access-control-allow-origin'] = allowedOrigin;
+        headers['access-control-allow-credentials'] = 'true';
+      }
+      return headers;
+    };
+    const json = (data, status=200, headers={}) => new Response(JSON.stringify(data), {status, headers:{'content-type':'application/json; charset=UTF-8','cache-control':'no-store',...corsHeaders(),...headers}});
     const cookieName = 'uvc_session';
     const sign = async (value) => { const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(env.SESSION_SECRET), {name:'HMAC',hash:'SHA-256'}, false, ['sign']); const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(value)); return btoa(String.fromCharCode(...new Uint8Array(sig))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''); };
     const validSession = async () => { if (!env.SESSION_SECRET) return false; const rawCookie=request.headers.get('Cookie')||''; const match=rawCookie.split(';').map(x=>x.trim()).find(x=>x.startsWith(cookieName+'=')); if(!match)return false; const parts=match.slice(cookieName.length+1).split('.'); if(parts.length!==2||!/^\d+$/.test(parts[0]))return false; const expiry=Number(parts[0]); if(expiry<Math.floor(Date.now()/1000)||expiry>Math.floor(Date.now()/1000)+86400*8)return false; return parts[1]===await sign(parts[0]); };
     const clearCookie = 'uvc_session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0';
+    const identityCookieName = 'uvc_identity';
+    const readIdentityCookie = async () => {
+      const raw = request.headers.get('Cookie') || '';
+      const item = raw.split(';').map(x=>x.trim()).find(x=>x.startsWith(identityCookieName+'='));
+      if (!item || !env.SESSION_SECRET) return '';
+      const parts = item.slice(identityCookieName.length+1).split('.');
+      if (parts.length !== 2 || !/^[A-Za-z0-9_-]{8,128}$/.test(parts[0])) return '';
+      return parts[1] === await sign('identity:'+parts[0]) ? parts[0] : '';
+    };
+    const identityCookie = async (identityId) => identityCookieName+'='+identityId+'.'+await sign('identity:'+identityId)+'; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000';
+    if (url.pathname.startsWith('/api/') && request.method === 'OPTIONS') {
+      if (requestOrigin && requestOrigin !== allowedOrigin) return new Response(null,{status:403,headers:{'vary':'Origin'}});
+      return new Response(null,{status:204,headers:corsHeaders()});
+    }
     const authUnavailable = () => json({ok:false,message:'Autenticação não configurada. Configure ADMIN_USERNAME, ADMIN_PASSWORD e SESSION_SECRET em Variáveis e segredos.'},503);
     const isSafeEqual = (a,b) => {
       const aa = new TextEncoder().encode(String(a));
@@ -37,6 +61,42 @@ export default {
     if (!publicPaths.has(url.pathname) && !await validSession()) {
       if (url.pathname.startsWith('/api/')) return json({ok:false,message:'Não autenticado.'},401);
       return Response.redirect(new URL('/login?next=' + encodeURIComponent(url.pathname + url.search), request.url),302);
+    }
+    // Módulo 1: identidade selecionada fica em cookie assinado, sem alterar a autenticação principal.
+    if (url.pathname === '/api/influencers/identity' && request.method === 'GET') {
+      return json({ok:true,identityId:await readIdentityCookie() || null});
+    }
+    if (url.pathname === '/api/influencers/identity/select' && request.method === 'POST') {
+      let body;
+      try { body = await request.json(); } catch { return json({ok:false,message:'Envie um JSON válido com identityId.'},400); }
+      const identityId = String(body.identityId || '').trim();
+      if (!/^[A-Za-z0-9_-]{8,128}$/.test(identityId)) return json({ok:false,message:'Identificador de identidade inválido.'},400);
+      return json({ok:true,identityId},200,{'set-cookie':await identityCookie(identityId)});
+    }
+    if (url.pathname === '/api/influencers/identity/clear' && request.method === 'POST') {
+      return json({ok:true,identityId:null},200,{'set-cookie':identityCookieName+'=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0'});
+    }
+    if (url.pathname === '/api/influencers/identity/create' && request.method === 'POST') {
+      if (!env.COLAB_MODULE1_URL) return json({ok:false,message:'Configure COLAB_MODULE1_URL nos segredos/variáveis do Cloudflare para conectar o endpoint do Módulo 1.'},503);
+      let body;
+      try { body = await request.json(); } catch { return json({ok:false,message:'Envie um JSON válido com os dados da nova influencer.'},400); }
+      const prompt = String(body.prompt || '').trim();
+      const name = String(body.name || '').trim().slice(0,100);
+      if (prompt.length < 8 || prompt.length > 5000) return json({ok:false,message:'O prompt deve ter entre 8 e 5.000 caracteres.'},400);
+      if (body.mode !== 'influencer' && body.mode !== 'my_identity') return json({ok:false,message:'mode deve ser influencer ou my_identity.'},400);
+      const payload = {module:1,action:'create_identity',mode:body.mode,name,prompt,referenceImage:body.referenceImage || null,identityId:body.identityId || null};
+      try {
+        const headers = {'content-type':'application/json','accept':'application/json'};
+        if (env.COLAB_API_TOKEN) headers.authorization = 'Bearer '+env.COLAB_API_TOKEN;
+        const upstream = await fetch(env.COLAB_MODULE1_URL,{method:'POST',headers,body:JSON.stringify(payload),signal:AbortSignal.timeout(90000)});
+        const result = await upstream.json().catch(()=>({}));
+        if (!upstream.ok) return json({ok:false,message:String(result.message || result.error || 'O Colab recusou a solicitação.').slice(0,300)},502);
+        const identityId = String(result.identityId || result.id || '').trim();
+        if (!/^[A-Za-z0-9_-]{8,128}$/.test(identityId)) return json({ok:false,message:'O Colab respondeu, mas não devolveu um identityId válido.'},502);
+        return json({ok:true,identityId,status:result.status || 'accepted',mode:body.mode},200,{'set-cookie':await identityCookie(identityId)});
+      } catch (error) {
+        return json({ok:false,message:'Não foi possível conectar ao Colab. Verifique COLAB_MODULE1_URL e se o notebook está ativo.'},502);
+      }
     }
     if (url.pathname === '/api/influencers/reference-from-url' && request.method === 'POST') {
       let body;
