@@ -29,11 +29,11 @@ export default {
     const normalizeColabEndpoint = (value) => {
       let raw = String(value || '').trim();
       // Corrige o formato do link Colab quando a rota veio colada ao domínio.
-      raw = raw.replace(/\\.dev(create_identity|generate_image)$/i, '.dev/$1');
+      raw = raw.replace(/\.dev(create_identity|generate_image)$/i, '.dev/$1');
       const parsed = new URL(raw);
       if (!['https:'].includes(parsed.protocol)) throw new Error('O endpoint Colab precisa usar HTTPS.');
-      parsed.pathname = parsed.pathname.replace(/\\/{2,}/g, '/');
-      return parsed.toString().replace(/\\/$/, '');
+      parsed.pathname = parsed.pathname.replace(/\/{2,}/g, '/');
+      return parsed.toString().replace(/\/$/, '');
     };
     if (url.pathname.startsWith('/api/') && request.method === 'OPTIONS') {
       if (requestOrigin && requestOrigin !== allowedOrigin) return new Response(null,{status:403,headers:{'vary':'Origin'}});
@@ -97,7 +97,8 @@ export default {
       try {
         const headers = {'content-type':'application/json','accept':'application/json'};
         if (env.COLAB_API_TOKEN) headers.authorization = 'Bearer '+env.COLAB_API_TOKEN;
-        const endpoint = normalizeColabEndpoint(env.COLAB_MODULE1_URL);\n        const upstream = await fetch(endpoint,{method:'POST',headers,body:JSON.stringify(payload),signal:AbortSignal.timeout(90000)});
+        const endpoint = normalizeColabEndpoint(env.COLAB_MODULE1_URL);
+        const upstream = await fetch(endpoint,{method:'POST',headers,body:JSON.stringify(payload),signal:AbortSignal.timeout(90000)});
         const result = await upstream.json().catch(()=>({}));
         if (!upstream.ok) return json({ok:false,message:String(result.message || result.error || 'O Colab recusou a solicitação.').slice(0,300)},502);
         const identityId = String(result.identityId || result.id || '').trim();
