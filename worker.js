@@ -265,7 +265,8 @@ export default {
         const chunkSize = 0x8000;
         for (let i=0;i<bytes.length;i+=chunkSize) binary += String.fromCharCode(...bytes.subarray(i, i+chunkSize));
         const referenceImage = 'data:'+(reference.type || 'image/png')+';base64,'+btoa(binary);
-        const mode = url.pathname.endsWith('/identity') ? 'my_identity' : 'influencer';
+        const mode = String(form.get('mode') || 'influencer');
+        if (!['influencer','my_identity'].includes(mode)) return json({ok:false,message:'Modo de criação inválido. Atualize a página e tente novamente.'},400);
         const payload = {module:1,action:'create_identity',mode,name:String(form.get('name') || '').trim().slice(0,100),prompt,referenceImage};
         const headers = {'content-type':'application/json','accept':'application/json'};
         if (env.COLAB_API_TOKEN) headers.authorization = 'Bearer '+env.COLAB_API_TOKEN;
@@ -360,14 +361,15 @@ document.getElementById("createForm").addEventListener("submit",async e=>{
   const referenceFile=selectedReferenceFile||(file.files&&file.files[0])||window.__uvcReferenceFile||null;
   if(!document.getElementById("prompt").reportValidity())return;
   if(!referenceFile){status.textContent="Adicione uma foto de referência antes de gerar.";drop.focus();return;}
-  const prompt=document.getElementById("prompt").value.trim();
+  const promptField=document.getElementById("prompt");
+  const prompt=promptField.value.trim();
   const result=document.getElementById("result"), art=document.getElementById("resultArt"), submit=e.target.querySelector('button[type="submit"]');
   result.hidden=false; art.replaceChildren(); generatedBlob=null; generatedPrompt=prompt;
   document.getElementById("download").disabled=true;document.getElementById("saveInfluencer").disabled=true;
   submit.disabled=true;submit.textContent="Gerando influencer…";status.textContent="Enviando a foto e o prompt ao gerador de imagens gratuito do Cloudflare. Isso pode levar alguns instantes.";
   const loading=document.createElement("p");loading.textContent="Criando sua influencer a partir da referência…";art.appendChild(loading);
   try{
-    const bitmap=await createImageBitmap(referenceFile);const scale=Math.min(1,512/Math.max(bitmap.width,bitmap.height));const canvas=document.createElement("canvas");canvas.width=Math.max(64,Math.round(bitmap.width*scale));canvas.height=Math.max(64,Math.round(bitmap.height*scale));const ctx=canvas.getContext("2d");ctx.drawImage(bitmap,0,0,canvas.width,canvas.height);if(bitmap.close)bitmap.close();const resizedReference=await new Promise((resolve,reject)=>canvas.toBlob(blob=>blob?resolve(blob):reject(new Error("Não foi possível preparar a foto de referência.")),"image/png"));const formData=new FormData();formData.append("reference",resizedReference,"referencia.png");formData.append("prompt",prompt);
+    const bitmap=await createImageBitmap(referenceFile);const scale=Math.min(1,512/Math.max(bitmap.width,bitmap.height));const canvas=document.createElement("canvas");canvas.width=Math.max(64,Math.round(bitmap.width*scale));canvas.height=Math.max(64,Math.round(bitmap.height*scale));const ctx=canvas.getContext("2d");ctx.drawImage(bitmap,0,0,canvas.width,canvas.height);if(bitmap.close)bitmap.close();const resizedReference=await new Promise((resolve,reject)=>canvas.toBlob(blob=>blob?resolve(blob):reject(new Error("Não foi possível preparar a foto de referência.")),"image/png"));const formData=new FormData();formData.append("reference",resizedReference,"referencia.png");formData.append("prompt",prompt);formData.append("mode",location.pathname.endsWith("/identity")?"my_identity":"influencer");
     const response=await fetch("/api/influencers/generate",{method:"POST",body:formData,credentials:"same-origin",cache:"no-store"});
     const type=response.headers.get("content-type")||"";
     const data=type.includes("application/json")?await response.json():null;
@@ -376,8 +378,8 @@ document.getElementById("createForm").addEventListener("submit",async e=>{
     status.textContent="Identidade registrada com sucesso. A geração da imagem será feita pelo Módulo 2.";
     art.replaceChildren();const confirmation=document.createElement("p");confirmation.textContent="Identidade salva. ID: "+data.identityId;art.appendChild(confirmation);
     setStatus(data.message||"Identidade registrada e vinculada à sua sessão. Ela estará disponível para o Módulo 2.");
-  }catch(err){art.replaceChildren();const note=document.createElement("p");note.textContent=err.message||"Não foi possível gerar a influencer.";art.appendChild(note);setStatus(note.textContent,true);status.textContent="Nenhuma imagem foi criada nesta tentativa.";}
-  finally{submit.disabled=false;submit.textContent=location.pathname.endsWith("/identity")?"Gerar minha identidade":"Gerar influencer";}
+  }catch(err){promptField.value=prompt;art.replaceChildren();const note=document.createElement("p");note.textContent=err.message||"Não foi possível gerar a influencer.";art.appendChild(note);setStatus(note.textContent,true);status.textContent="Nenhuma identidade foi criada. Seu prompt foi mantido para nova tentativa.";}
+  finally{if(!promptField.value.trim())promptField.value=prompt;submit.disabled=false;submit.textContent=location.pathname.endsWith("/identity")?"Gerar minha identidade":"Gerar influencer";}
 });
 document.getElementById("download").addEventListener("click",()=>{if(!generatedBlob||!generatedUrl)return;const a=document.createElement("a");a.href=generatedUrl;a.download="universe-influencer-"+Date.now()+".png";document.body.appendChild(a);a.click();a.remove();});
 document.getElementById("saveInfluencer").addEventListener("click",async()=>{if(!generatedBlob)return;const button=document.getElementById("saveInfluencer");button.disabled=true;try{const db=await openInfluencerDb();await new Promise((resolve,reject)=>{const tx=db.transaction("items","readwrite");tx.objectStore("items").put({id:crypto.randomUUID(),name:"Influencer criada em "+new Date().toLocaleDateString("pt-BR"),prompt:generatedPrompt,image:generatedBlob,createdAt:new Date().toISOString(),mimeType:generatedBlob.type||"image/png"});tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);});db.close();setStatus("Influencer guardada no armazenamento deste navegador. A integração com a Biblioteca central será feita numa etapa posterior.");status.textContent="Salva neste navegador.";}catch(err){setStatus("Não foi possível guardar a influencer neste navegador.",true);}finally{button.disabled=false;}});
