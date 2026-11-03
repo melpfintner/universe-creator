@@ -265,9 +265,13 @@ export default {
         const chunkSize = 0x8000;
         for (let i=0;i<bytes.length;i+=chunkSize) binary += String.fromCharCode(...bytes.subarray(i, i+chunkSize));
         const referenceImage = 'data:'+(reference.type || 'image/png')+';base64,'+btoa(binary);
-        const mode = String(form.get('mode') || 'influencer');
-        if (!['influencer','my_identity'].includes(mode)) return json({ok:false,message:'Modo de criação inválido. Atualize a página e tente novamente.'},400);
-        const payload = {module:1,action:'create_identity',mode,name:String(form.get('name') || '').trim().slice(0,100),prompt,referenceImage};
+        const requestedMode = String(form.get('mode') || 'influencer');
+        if (!['influencer','my_identity','ai_identity'].includes(requestedMode)) return json({ok:false,message:'Modo de criação inválido. Atualize a página e tente novamente.'},400);
+        // O frontend usa "my_identity", mas o schema FastAPI do Colab aceita "ai_identity".
+        const mode = requestedMode === 'my_identity' ? 'ai_identity' : requestedMode;
+        const name = String(form.get('name') || '').trim().slice(0,100);
+        // Contrato exato do IdentityPayload do Colab: somente estes seis campos.
+        const payload = {module:'1',action:'create_identity',mode,name,prompt,referenceImage};
         const headers = {'content-type':'application/json','accept':'application/json'};
         if (env.COLAB_API_TOKEN) headers.authorization = 'Bearer '+env.COLAB_API_TOKEN;
         const endpoint = normalizeColabEndpoint(env.COLAB_MODULE1_URL);
