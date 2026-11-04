@@ -111,7 +111,7 @@ export default {
     }
     // Módulo 2: usa ComfyUI quando conectado; caso contrário, usa o motor de IA do Worker.
     if (url.pathname === '/api/images/generate' && request.method === 'POST') {
-      if (!env.COLAB_MODULE2_URL && !env.AI) return json({ok:false,message:'O motor de geração não está conectado. Ative o Cloudflare AI ou o Colab.'},503);
+      if (!env.COLAB_MODULE2_URL && !env.COLAB_MODULE1_URL && !env.AI) return json({ok:false,message:'O motor de geração não está conectado. Ative o Colab.'},503);
       const contentType = request.headers.get('content-type') || '';
       const identityId = await readIdentityCookie();
       let outgoingBody;
@@ -158,7 +158,8 @@ export default {
           if (!generated || !generated.image) return json({ok:false,message:'O motor de IA não devolveu uma imagem.'},502);
           return json({ok:true,status:'succeeded',imageBase64:generated.image,mimeType:'image/png',outputId:crypto.randomUUID(),engine:'cloudflare-workers-ai'});
         }
-        const endpoint = normalizeColabEndpoint(env.COLAB_MODULE2_URL);
+        const imageBase = normalizeColabEndpoint(env.COLAB_MODULE2_URL || env.COLAB_MODULE1_URL);
+        const endpoint = /\\/generate_image$/.test(imageBase) ? imageBase : imageBase.replace(/\\/create_identity$/,'') + '/generate_image';
         const upstream = await fetch(endpoint,{method:'POST',headers,body:outgoingBody,signal:AbortSignal.timeout(120000)});
         const responseType = (upstream.headers.get('content-type') || '').toLowerCase();
         if (!upstream.ok) {
