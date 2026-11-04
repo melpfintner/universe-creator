@@ -9,7 +9,7 @@ def run(args, cwd=None):
     print("+", " ".join(map(str,args)), flush=True)
     subprocess.run(args, cwd=cwd, check=True)
 
-def install_requirements(path, label):
+def install_requirements(path, label, cwd=None):
     path = Path(path)
     if not path.exists():
         return
@@ -29,7 +29,7 @@ def install_requirements(path, label):
         lines.append(line)
     temp = Path("/tmp") / f"uvc-{label}-requirements.txt"
     temp.write_text("\n".join(lines))
-    run([sys.executable, "-m", "pip", "install", "-r", str(temp)])
+    run([sys.executable, "-m", "pip", "install", "-r", str(temp)], cwd=cwd)
 
 # O Drive deve ser montado em uma célula interativa do Colab antes deste script.
 # Em execução por subprocess, drive.mount() falha porque não há kernel IPython associado.
@@ -75,7 +75,7 @@ run(["git","submodule","update","--init","--recursive"], cwd=kohya)
 if not (kohya/"sd-scripts"/"train_network.py").exists():
     raise RuntimeError("O submódulo sd-scripts do Kohya_ss não foi baixado corretamente.")
 # Instala dependências não-PyTorch do Kohya sem substituir o torch do runtime.
-install_requirements(kohya/"requirements.txt", "kohya")
+install_requirements(kohya/"requirements.txt", "kohya", cwd=kohya)
 
 for folder in ["checkpoints","controlnet","loras","vae","clip_vision","ipadapter","animatediff_models"]:
     (Path("/content/ComfyUI/models")/folder).mkdir(parents=True,exist_ok=True)
