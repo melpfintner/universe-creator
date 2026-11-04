@@ -50,7 +50,7 @@ def queue_workflow(workflow,timeout=900):
             if entry and entry.get("outputs"):
                 files=[]
                 for node in entry["outputs"].values():
-                    files += node.get("images",[])+node.get("gifs",[])
+                    files += node.get("images",[])+node.get("gifs",[])+node.get("videos",[])
                 if files:
                     item=files[0]; data=requests.get(COMFY+"/view",params=item,timeout=120); data.raise_for_status()
                     return data.content,item,pid
@@ -136,13 +136,14 @@ def train_lora(payload:dict):
     base=Path("/content/ComfyUI/models/checkpoints")/CHECKPOINT
     if not base.exists(): raise HTTPException(503,"Checkpoint configurado não encontrado.")
     meta=json.loads((folder/"identity.json").read_text()); token="uvc_"+iid[:8]
-    train_dir=folder/"kohya_dataset"; train_dir.mkdir(exist_ok=True)
+    train_root=folder/"kohya_dataset"; train_root.mkdir(exist_ok=True)
+    train_dir=train_root/("10_"+token); train_dir.mkdir(exist_ok=True)
     for p in imgs:
         shutil.copy2(p,train_dir/p.name)
         caption=train_dir/(p.stem+".txt")
         if not caption.exists(): caption.write_text(token+", "+meta.get("prompt","").replace("\n"," ")[:500])
     output=LORAS/iid; output.mkdir(exist_ok=True)
-    args=["python",str(script),"--pretrained_model_name_or_path",str(base),"--train_data_dir",str(train_dir),"--output_dir",str(output),"--output_name",iid,"--resolution","1024,1024","--network_module","networks.lora","--network_dim",str(payload.get("networkDim",32)),"--network_alpha",str(payload.get("networkAlpha",16)),"--train_batch_size","1","--max_train_epochs",str(payload.get("epochs",8)),"--learning_rate","1e-4","--optimizer_type","AdamW8bit","--mixed_precision","fp16","--save_model_as","safetensors"]
+    args=["python",str(script),"--pretrained_model_name_or_path",str(base),"--train_data_dir",str(train_root),"--output_dir",str(output),"--output_name",iid,"--resolution","1024,1024","--network_module","networks.lora","--network_dim",str(payload.get("networkDim",32)),"--network_alpha",str(payload.get("networkAlpha",16)),"--train_batch_size","1","--max_train_epochs",str(payload.get("epochs",8)),"--learning_rate","1e-4","--optimizer_type","AdamW8bit","--mixed_precision","fp16","--save_model_as","safetensors"]
     log=output/"training.log"
     try:
         with log.open("w") as fp: proc=subprocess.Popen(args,stdout=fp,stderr=subprocess.STDOUT,start_new_session=True)
