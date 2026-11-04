@@ -159,7 +159,7 @@ export default {
           return json({ok:true,status:'succeeded',imageBase64:generated.image,mimeType:'image/png',outputId:crypto.randomUUID(),engine:'cloudflare-workers-ai'});
         }
         const imageBase = normalizeColabEndpoint(env.COLAB_MODULE2_URL || env.COLAB_MODULE1_URL);
-        const endpoint = /\\/generate_image$/.test(imageBase) ? imageBase : imageBase.replace(/\\/create_identity$/,'') + '/generate_image';
+        const endpoint = /\/generate_image$/.test(imageBase) ? imageBase : imageBase.replace(/\/create_identity$/,'') + '/generate_image';
         const upstream = await fetch(endpoint,{method:'POST',headers,body:outgoingBody,signal:AbortSignal.timeout(120000)});
         const responseType = (upstream.headers.get('content-type') || '').toLowerCase();
         if (!upstream.ok) {
