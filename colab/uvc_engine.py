@@ -9,10 +9,10 @@ ROOT=Path("/content/drive/MyDrive/UniVerseCreator")
 IDENTITIES=ROOT/"identities"; GENERATED=ROOT/"generated"; LORAS=ROOT/"loras"
 for p in (IDENTITIES,GENERATED,LORAS): p.mkdir(parents=True,exist_ok=True)
 COMFY=os.getenv("COMFYUI_URL","http://127.0.0.1:8188").rstrip("/")
-CHECKPOINT=os.getenv("COMFYUI_CHECKPOINT","sd_xl_base_1.0.safetensors")
-CONTROLNET=os.getenv("COMFYUI_CONTROLNET","")
-MOTION_MODULE=os.getenv("COMFYUI_MOTION_MODULE","")
-SD15_CHECKPOINT=os.getenv("COMFYUI_SD15_CHECKPOINT","v1-5-pruned-emaonly.safetensors")
+CHECKPOINT=os.getenv("COMFYUI_CHECKPOINT","v1-5-pruned-emaonly-fp16.safetensors")
+CONTROLNET=os.getenv("COMFYUI_CONTROLNET","control_v11p_sd15_openpose.pth")
+MOTION_MODULE=os.getenv("COMFYUI_MOTION_MODULE","v3_sd15_mm.ckpt")
+SD15_CHECKPOINT=os.getenv("COMFYUI_SD15_CHECKPOINT","v1-5-pruned-emaonly-fp16.safetensors")
 SVD_CHECKPOINT=os.getenv("COMFYUI_SVD_CHECKPOINT","")
 app=FastAPI(title="UniVerse Creator Engine",version="3.0")
 jobs={}
@@ -26,7 +26,7 @@ class ImageIn(BaseModel):
     prompt:str=Field(min_length=8,max_length=5000); identityId:Optional[str]=None
     referenceImage:Optional[str]=None; controlImage:Optional[str]=None
     controlnet:bool=False; lora:Optional[str]=None
-    width:int=1024; height:int=1024; steps:int=28; cfg:float=6.5
+    width:int=512; height:int=512; steps:int=24; cfg:float=6.5
     seed:Optional[int]=None
     negativePrompt:str="blurry, low quality, deformed hands, extra fingers, watermark, text, logo"
 
@@ -78,9 +78,11 @@ def build_image_workflow(req,control_name=None,reference_name=None):
         if not CONTROLNET: raise HTTPException(503,"Defina COMFYUI_CONTROLNET com o nome do modelo ControlNet instalado.")
         if not control_name: raise HTTPException(400,"Envie controlImage para aplicar ControlNet.")
         wf["9"]={"class_type":"LoadImage","inputs":{"image":control_name}}
-        wf["10"]={"class_type":"ControlNetLoader","inputs":{"control_net_name":CONTROLNET}}
-        wf["11"]={"class_type":"ControlNetApplyAdvanced","inputs":{"positive":["2",0],"negative":["3",0],"control_net":["10",0],"image":["9",0],"strength":0.8,"start_percent":0.0,"end_percent":1.0,"vae":["1",2]}}
-        wf["5"]["inputs"]["positive"]=["11",0]; wf["5"]["inputs"]["negative"]=["11",1]
+        # Convert the uploaded reference photo into pose keypoints before ControlNet.
+        wf["10"]={"class_type":"OpenposePreprocessor","inputs":{"image":["9",0],"detect_hand":"enable","detect_body":"enable","detect_face":"disable","resolution":512}}
+        wf["11"]={"class_type":"ControlNetLoader","inputs":{"control_net_name":CONTROLNET}}
+        wf["12"]={"class_type":"ControlNetApplyAdvanced","inputs":{"positive":["2",0],"negative":["3",0],"control_net":["11",0],"image":["10",0],"strength":0.8,"start_percent":0.0,"end_percent":1.0,"vae":["1",2]}}
+        wf["5"]["inputs"]["positive"]=["12",0]; wf["5"]["inputs"]["negative"]=["12",1]
     return wf
 
 @app.get("/")
