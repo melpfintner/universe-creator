@@ -12,6 +12,7 @@ COMFY=os.getenv("COMFYUI_URL","http://127.0.0.1:8188").rstrip("/")
 CHECKPOINT=os.getenv("COMFYUI_CHECKPOINT","sd_xl_base_1.0.safetensors")
 CONTROLNET=os.getenv("COMFYUI_CONTROLNET","")
 MOTION_MODULE=os.getenv("COMFYUI_MOTION_MODULE","")
+SD15_CHECKPOINT=os.getenv("COMFYUI_SD15_CHECKPOINT","v1-5-pruned-emaonly.safetensors")
 SVD_CHECKPOINT=os.getenv("COMFYUI_SVD_CHECKPOINT","")
 app=FastAPI(title="UniVerse Creator Engine",version="3.0")
 jobs={}
@@ -116,6 +117,10 @@ def generate_image(data:ImageIn):
     if data.identityId and (folder/"identity.json").exists():
         meta=json.loads((folder/"identity.json").read_text()); prompt+="\nIdentity description: "+meta.get("prompt","")
     data.prompt=prompt
+    if data.identityId and not data.lora:
+        trained=LORAS/data.identityId
+        candidates=sorted(trained.glob("*.safetensors")) if trained.exists() else []
+        if candidates: data.lora=candidates[-1].name
     try:
         control_name=comfy_upload(decode_data_url(data.controlImage),"uvc_control.png") if data.controlImage else None
         wf=build_image_workflow(data,control_name)
@@ -160,6 +165,37 @@ def train_status(identity_id:str):
     except: pass
     ready=list(output.glob("*.safetensors"))
     return {"ok":True,"status":"running" if alive else ("succeeded" if ready else "failed"),"loraReady":bool(ready),"files":[p.name for p in ready],"logTail":tail}
+@app.post("/generate_video_animatediff")
+def generate_video_animatediff(payload:dict):
+    if not MOTION_MODULE: raise HTTPException(503,"AnimateDiff não está configurado. Instale o motion module SD1.5.")
+    checkpoint=Path("/content/ComfyUI/models/checkpoints")/SD15_CHECKPOINT
+    motion=Path("/content/ComfyUI/models/animatediff_models")/MOTION_MODULE
+    if not checkpoint.exists(): raise HTTPException(503,"Checkpoint SD1.5 não encontrado.")
+    if not motion.exists(): raise HTTPException(503,"Motion module AnimateDiff não encontrado na pasta animatediff_models.")
+    prompt=str(payload.get("prompt") or "cinematic natural movement, realistic motion")
+    negative=str(payload.get("negativePrompt") or "blurry, low quality, flicker, distorted face, extra limbs")
+    width=max(512,min(768,int(payload.get("width",512))//64*64))
+    height=max(512,min(768,int(payload.get("height",512))//64*64))
+    frames=max(8,min(32,int(payload.get("frames",16))))
+    fps=max(4,min(12,int(payload.get("fps",8))))
+    seed=int(payload.get("seed",int(time.time()*1000)%2147483647))
+    wf={
+      "1":{"class_type":"CheckpointLoaderSimple","inputs":{"ckpt_name":SD15_CHECKPOINT}},
+      "2":{"class_type":"CLIPTextEncode","inputs":{"text":prompt,"clip":["1",1]}},
+      "3":{"class_type":"CLIPTextEncode","inputs":{"text":negative,"clip":["1",1]}},
+      "4":{"class_type":"EmptyLatentImage","inputs":{"width":width,"height":height,"batch_size":frames}},
+      "5":{"class_type":"ADE_AnimateDiffLoaderGen1","inputs":{"model":["1",0],"model_name":MOTION_MODULE,"beta_schedule":"autoselect"}},
+      "6":{"class_type":"KSampler","inputs":{"seed":seed,"steps":max(15,min(30,int(payload.get("steps",20)))),"cfg":7.0,"sampler_name":"euler","scheduler":"normal","denoise":1.0,"model":["5",0],"positive":["2",0],"negative":["3",0],"latent_image":["4",0]}},
+      "7":{"class_type":"VAEDecode","inputs":{"samples":["6",0],"vae":["1",2]}},
+      "8":{"class_type":"VHS_VideoCombine","inputs":{"images":["7",0],"frame_rate":fps,"loop_count":0,"filename_prefix":"uvc_animatediff","format":"video/h264-mp4","pingpong":False,"save_output":True}}
+    }
+    try:
+        _,item,pid=queue_workflow(wf,timeout=1800)
+        video=requests.get(COMFY+"/view",params=item,timeout=180).content
+        oid=uuid.uuid4().hex; out=GENERATED/(oid+".mp4"); out.write_bytes(video)
+        return {"ok":True,"status":"succeeded","outputId":oid,"videoBase64":base64.b64encode(video).decode(),"mimeType":"video/mp4","drivePath":str(out),"promptId":pid,"engine":"AnimateDiff-Evolved"}
+    except Exception as e: raise HTTPException(502,"Falha na geração AnimateDiff: "+str(e)[:250])
+
 @app.post("/generate_video")
 def generate_video(payload:dict):
     image_value=payload.get("image") or payload.get("referenceImage")
