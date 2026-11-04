@@ -104,16 +104,16 @@ def download_model(url, destination):
     run(["wget", "-c", "--show-progress", "-O", str(destination), url])
 
 download_model(
-    "https://huggingface.co/runwayml/stable-diffusion-v1-5/resolve/main/v1-5-pruned-emaonly.ckpt",
-    "/content/ComfyUI/models/checkpoints/v1-5-pruned-emaonly.ckpt"
+    "https://huggingface.co/Comfy-Org/stable-diffusion-v1-5-archive/resolve/main/v1-5-pruned-emaonly-fp16.safetensors",
+    "/content/ComfyUI/models/checkpoints/v1-5-pruned-emaonly-fp16.safetensors"
 )
 download_model(
     "https://huggingface.co/lllyasviel/ControlNet-v1-1/resolve/main/control_v11p_sd15_openpose.pth",
     "/content/ComfyUI/models/controlnet/control_v11p_sd15_openpose.pth"
 )
 download_model(
-    "https://huggingface.co/conrevo/AnimateDiff-A1111/resolve/main/motion_module/mm_sd15_v3.safetensors",
-    "/content/ComfyUI/models/animatediff_models/mm_sd15_v3.safetensors"
+    "https://huggingface.co/guoyww/animatediff/resolve/main/v3_sd15_mm.ckpt",
+    "/content/ComfyUI/models/animatediff_models/v3_sd15_mm.ckpt"
 )
 
 gpu=subprocess.run(["nvidia-smi"],capture_output=True,text=True)
