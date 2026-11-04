@@ -31,11 +31,11 @@ def install_requirements(path, label):
     temp.write_text("\n".join(lines))
     run([sys.executable, "-m", "pip", "install", "-r", str(temp)])
 
-try:
-    from google.colab import drive
-    drive.mount("/content/drive")
-except Exception as exc:
-    raise RuntimeError("Execute este script dentro do Google Colab e autorize o Google Drive.") from exc
+# O Drive deve ser montado em uma célula interativa do Colab antes deste script.
+# Em execução por subprocess, drive.mount() falha porque não há kernel IPython associado.
+if not Path("/content/drive/MyDrive").exists():
+    raise RuntimeError("Google Drive não está montado. Execute em uma célula do Colab: from google.colab import drive; drive.mount('/content/drive')")
+print("Google Drive já está montado.", flush=True)
 
 ROOT = Path("/content/drive/MyDrive/UniVerseCreator")
 ROOT.mkdir(parents=True, exist_ok=True)
