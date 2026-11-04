@@ -29,6 +29,10 @@ def install_requirements(path, label, cwd=None):
         # Kohya pins NumPy 1.x and SciPy 1.11.4, which have no compatible
         # wheels for the Colab Python 3.13 runtime. Keep Colab's working
         # NumPy/SciPy versions instead of forcing an impossible source build.
+        if label == "kohya" and package == "onnx":
+            print(f"REPLACE {label}: {stripped} -> onnx==1.19.0 (Python 3.13 compatible wheel)")
+            lines.append("onnx==1.19.0")
+            continue
         if label == "kohya" and package in ("numpy", "scipy"):
             print(f"SKIP {label} (use Colab-compatible version): {stripped}")
             continue
