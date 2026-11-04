@@ -87,17 +87,23 @@ def build_image_workflow(req,control_name=None,reference_name=None):
 def root(): return {"status":"online","system":"UniVerse Creator Engine","version":"3.0","engine":"ComfyUI"}
 @app.get("/health")
 def health():
+    drive_ok=ROOT.exists()
     try:
         r=requests.get(COMFY+"/system_stats",timeout=8); r.raise_for_status()
+        comfy_ok=True
         models=[p.name for p in (Path("/content/ComfyUI/models/checkpoints")).glob("*.safetensors")]
+        checkpoint_ok=CHECKPOINT in models
+        sd15_ok=SD15_CHECKPOINT in models
         controlnet_ok=bool(CONTROLNET and (Path("/content/ComfyUI/models/controlnet")/CONTROLNET).exists())
         motion_ok=bool(MOTION_MODULE and (Path("/content/ComfyUI/models/animatediff_models")/MOTION_MODULE).exists())
         svd_ok=bool(SVD_CHECKPOINT and (Path("/content/ComfyUI/models/checkpoints")/SVD_CHECKPOINT).exists())
         kohya_ok=Path("/content/kohya_ss/sd-scripts/train_network.py").exists()
         import torch
         gpu_ok=torch.cuda.is_available()
-        return {"status":"healthy" if ROOT.exists() and gpu_ok else "degraded","drive":ROOT.exists(),"comfyui":True,"gpu":gpu_ok,"gpu_name":torch.cuda.get_device_name(0) if gpu_ok else None,"checkpoint":CHECKPOINT in models,"sd15_checkpoint":SD15_CHECKPOINT in models,"controlnet_configured":controlnet_ok,"animatediff_configured":motion_ok,"svd_configured":svd_ok,"kohya_installed":kohya_ok}
-    except Exception as e: return {"status":"degraded","drive":ROOT.exists(),"comfyui":False,"error":str(e)[:180]}
+        ready=drive_ok and comfy_ok and gpu_ok and checkpoint_ok
+        return {"status":"healthy" if ready else "degraded","ready_for_image_generation":ready,"drive":drive_ok,"comfyui":comfy_ok,"gpu":gpu_ok,"gpu_name":torch.cuda.get_device_name(0) if gpu_ok else None,"checkpoint":checkpoint_ok,"sd15_checkpoint":sd15_ok,"controlnet_configured":controlnet_ok,"animatediff_configured":motion_ok,"svd_configured":svd_ok,"kohya_installed":kohya_ok}
+    except Exception as e:
+        return {"status":"degraded","ready_for_image_generation":False,"drive":drive_ok,"comfyui":False,"error":str(e)[:180]}
 @app.post("/create_identity")
 def create_identity(data:IdentityIn):
     if data.mode not in ("influencer","my_identity","ai_identity"): raise HTTPException(400,"Modo de identidade inválido.")
