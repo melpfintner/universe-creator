@@ -196,7 +196,7 @@ export default {
       if (!Array.isArray(body.images) || !body.images.length || body.images.length>50) return json({ok:false,message:'Envie de 1 a 50 imagens para o dataset.'},400);
       if (!env.COLAB_MODULE1_URL) return json({ok:false,message:'Conecte o runtime GPU do Colab.'},503);
       try {
-        const base=normalizeColabEndpoint(env.COLAB_MODULE1_URL).replace(/\\/create_identity$/,'');
+        const base=normalizeColabEndpoint(env.COLAB_MODULE1_URL).replace('/create_identity','');
         const response=await fetch(base+'/identity/'+encodeURIComponent(iid)+'/dataset',{method:'POST',headers:{'content-type':'application/json','accept':'application/json',...(env.COLAB_API_TOKEN?{authorization:'Bearer '+env.COLAB_API_TOKEN}:{})},body:JSON.stringify(body),signal:AbortSignal.timeout(120000)});
         const data=await response.json().catch(()=>({}));
         return json(data,response.status===200?200:response.status);
