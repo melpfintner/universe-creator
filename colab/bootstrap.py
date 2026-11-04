@@ -1,15 +1,35 @@
 """UniVerse Creator Colab bootstrap.
-Run in a Colab cell after cloning/downloading this repository:
-    %run /content/universe-creator/colab/bootstrap.py
-This installs open-source runtimes and starts the API. Model weights are NOT
-downloaded automatically; configure them separately in ComfyUI/models.
+Instala o backend sem substituir a versão de PyTorch fornecida pela GPU do Colab.
+Os pesos dos modelos devem ser adicionados separadamente, respeitando suas licenças.
 """
-import os, sys, subprocess, time
+import os, sys, subprocess, tempfile
 from pathlib import Path
 
 def run(args, cwd=None):
     print("+", " ".join(map(str,args)), flush=True)
     subprocess.run(args, cwd=cwd, check=True)
+
+def install_requirements(path, label):
+    path = Path(path)
+    if not path.exists():
+        return
+    # Preserva o PyTorch/CUDA do runtime Colab. Dependências que exigem
+    # versões específicas de torch precisam ser resolvidas manualmente.
+    blocked = ("torch", "torchvision", "torchaudio", "xformers", "triton")
+    lines = []
+    for line in path.read_text(errors="ignore").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith(("#", "-f ", "--")):
+            lines.append(line)
+            continue
+        package = stripped.split(";")[0].split("[")[0].split("==")[0].split(">=")[0].split("<")[0].strip().lower().replace("_","-")
+        if any(package == item or package.startswith(item+"-") for item in blocked):
+            print(f"SKIP {label}: {stripped}")
+            continue
+        lines.append(line)
+    temp = Path("/tmp") / f"uvc-{label}-requirements.txt"
+    temp.write_text("\n".join(lines))
+    run([sys.executable, "-m", "pip", "install", "-r", str(temp)])
 
 try:
     from google.colab import drive
@@ -20,16 +40,16 @@ except Exception as exc:
 ROOT = Path("/content/drive/MyDrive/UniVerseCreator")
 ROOT.mkdir(parents=True, exist_ok=True)
 REPO = Path("/content/universe-creator")
-if not REPO.exists():
+if not (REPO / "colab" / "uvc_engine.py").exists():
     raise RuntimeError("Clone o repositório em /content/universe-creator antes de executar.")
-ENGINE = REPO / "colab" / "uvc_engine.py"
-if not ENGINE.exists():
-    raise RuntimeError("Arquivo colab/uvc_engine.py não encontrado no repositório.")
 
 if not Path("/content/ComfyUI/main.py").exists():
     run(["git","clone","https://github.com/comfyanonymous/ComfyUI.git","/content/ComfyUI"])
-run([sys.executable,"-m","pip","install","-r",str(REPO/"colab"/"requirements.txt")])
-run([sys.executable,"-m","pip","install","-r","requirements.txt"],cwd="/content/ComfyUI")
+
+# Primeiro instala a API e dependências básicas.
+install_requirements(REPO/"colab"/"requirements.txt", "api")
+# Instala dependências do ComfyUI sem trocar torch/CUDA do Colab.
+install_requirements("/content/ComfyUI/requirements.txt", "comfyui")
 
 custom = Path("/content/ComfyUI/custom_nodes")
 custom.mkdir(parents=True,exist_ok=True)
@@ -44,26 +64,24 @@ for name,url in nodes.items():
     dest=custom/name
     if not dest.exists():
         run(["git","clone",url,str(dest)])
-    reqfile=dest/"requirements.txt"
-    if reqfile.exists():
-        run([sys.executable,"-m","pip","install","-r",str(reqfile)])
+    install_requirements(dest/"requirements.txt", name.lower().replace("-","_"))
 
 kohya=Path("/content/kohya_ss")
 if not (kohya/"sd-scripts"/"train_network.py").exists():
     run(["git","clone","https://github.com/bmaltais/kohya_ss.git",str(kohya)])
-kohya_req=kohya/"requirements.txt"
-if kohya_req.exists():
-    run([sys.executable,"-m","pip","install","-r",str(kohya_req)])
+# Instala dependências não-PyTorch do Kohya sem substituir o torch do runtime.
+install_requirements(kohya/"requirements.txt", "kohya")
 
-for folder in ["checkpoints","controlnet","loras","vae","clip_vision","animatediff_models"]:
+for folder in ["checkpoints","controlnet","loras","vae","clip_vision","ipadapter","animatediff_models"]:
     (Path("/content/ComfyUI/models")/folder).mkdir(parents=True,exist_ok=True)
 
 gpu=subprocess.run(["nvidia-smi"],capture_output=True,text=True)
 if gpu.returncode != 0:
-    raise RuntimeError("Nenhuma GPU NVIDIA disponível nesta sessão. No Colab, selecione Ambiente de execução > Alterar tipo de ambiente de execução > GPU.")
+    raise RuntimeError("Nenhuma GPU NVIDIA disponível. Selecione Ambiente de execução > Alterar tipo > GPU.")
 print(gpu.stdout[:2500])
 print("\nINSTALAÇÃO BASE CONCLUÍDA.")
-print("IMPORTANTE: ainda é necessário colocar pesos/modelos licenciados nas pastas de ComfyUI/models.")
-print("Configure COMFYUI_CHECKPOINT, COMFYUI_CONTROLNET, COMFYUI_MOTION_MODULE e COMFYUI_SVD_CHECKPOINT.")
-print("Para iniciar o ComfyUI, execute em uma célula: !python /content/ComfyUI/main.py --listen 127.0.0.1 --port 8188")
-print("Em outra célula, execute: !uvicorn uvc_engine:app --app-dir /content/universe-creator/colab --host 0.0.0.0 --port 8000")
+print("O PyTorch/CUDA existente foi preservado. Confira os avisos de dependências incompatíveis.")
+print("Pesos de modelos NÃO são baixados automaticamente. Adicione apenas arquivos com licença adequada.")
+print("Configure COMFYUI_CHECKPOINT, COMFYUI_SD15_CHECKPOINT, COMFYUI_CONTROLNET, COMFYUI_MOTION_MODULE e COMFYUI_SVD_CHECKPOINT.")
+print("Inicie o ComfyUI em uma célula: !python /content/ComfyUI/main.py --listen 127.0.0.1 --port 8188")
+print("Inicie a API em outra: !uvicorn uvc_engine:app --app-dir /content/universe-creator/colab --host 0.0.0.0 --port 8000")
