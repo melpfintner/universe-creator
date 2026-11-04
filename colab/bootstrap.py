@@ -122,7 +122,6 @@ if gpu.returncode != 0:
 print(gpu.stdout[:2500])
 print("\nINSTALAÇÃO BASE CONCLUÍDA.")
 print("O PyTorch/CUDA existente foi preservado. Confira os avisos de dependências incompatíveis.")
-print("Pesos de modelos NÃO são baixados automaticamente. Adicione apenas arquivos com licença adequada.")
 print("Stack SD1.5, ControlNet OpenPose e AnimateDiff v3 baixados para o runtime T4.")
 print("SVD permanece opcional: o checkpoint oficial exige aceite de licença/termos na Hugging Face.")
 print("Para iniciar ComfyUI + API protegida + túnel HTTPS, execute em uma célula:")
