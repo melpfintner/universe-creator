@@ -97,10 +97,7 @@ export default {
       try {
         const headers = {'content-type':'application/json','accept':'application/json'};
         if (env.COLAB_API_TOKEN) headers.authorization = 'Bearer '+env.COLAB_API_TOKEN;
-        if (!env.COLAB_MODULE1_URL) {
-          const identityId = crypto.randomUUID().replace(/-/g,'');
-          return json({ok:true,identityId,status:'registered',message:'Identidade registrada para esta sessão. A geração será feita pelo motor de IA.' ,mode:body.mode},200,{'set-cookie':await identityCookie(identityId)});
-        }
+        if (!env.COLAB_MODULE1_URL) return json({ok:false,message:'O Colab precisa estar ativo para salvar a identidade e a foto de referência no Google Drive.'},503);
         const endpoint = normalizeColabEndpoint(env.COLAB_MODULE1_URL);
         const upstream = await fetch(endpoint,{method:'POST',headers,body:JSON.stringify(payload),signal:AbortSignal.timeout(90000)});
         const result = await upstream.json().catch(()=>({}));
@@ -168,6 +165,40 @@ export default {
       } catch (error) {
         return json({ok:false,message:String(error && error.message || '').includes('HTTPS') ? 'O endpoint do Colab precisa usar HTTPS.' : 'Não foi possível conectar ao endpoint de imagens do Colab. Confira se o notebook está ativo e se a URL está correta.'},502);
       }
+    }
+    // Rotas do motor GPU: treinamento LoRA, consulta de treinamento e geração de vídeo SVD.
+    if (url.pathname === '/api/influencers/train-lora' && request.method === 'POST') {
+      if (!env.COLAB_MODULE1_URL) return json({ok:false,message:'Conecte o runtime GPU do Colab antes de iniciar o treinamento LoRA.'},503);
+      let body; try { body=await request.json(); } catch { return json({ok:false,message:'Envie identityId em JSON.'},400); }
+      if (!/^[A-Za-z0-9_-]{8,128}$/.test(String(body.identityId||''))) return json({ok:false,message:'identityId inválido.'},400);
+      try {
+        const base=normalizeColabEndpoint(env.COLAB_MODULE1_URL).replace(/\/create_identity$/,'');
+        const response=await fetch(base+'/train_lora',{method:'POST',headers:{'content-type':'application/json','accept':'application/json',...(env.COLAB_API_TOKEN?{authorization:'Bearer '+env.COLAB_API_TOKEN}:{})},body:JSON.stringify(body),signal:AbortSignal.timeout(30000)});
+        const data=await response.json().catch(()=>({}));
+        return json(data,response.status===200?200:response.status,{});
+      } catch { return json({ok:false,message:'Não foi possível acessar o serviço Kohya_ss no Colab.'},502); }
+    }
+    if (url.pathname.startsWith('/api/influencers/train-lora/') && request.method === 'GET') {
+      const iid=decodeURIComponent(url.pathname.split('/').pop()||'');
+      if (!/^[A-Za-z0-9_-]{8,128}$/.test(iid)) return json({ok:false,message:'identityId inválido.'},400);
+      if (!env.COLAB_MODULE1_URL) return json({ok:false,message:'O Colab GPU não está conectado.'},503);
+      try {
+        const base=normalizeColabEndpoint(env.COLAB_MODULE1_URL).replace(/\/create_identity$/,'');
+        const response=await fetch(base+'/train_lora/'+encodeURIComponent(iid)+'/status',{headers:{'accept':'application/json',...(env.COLAB_API_TOKEN?{authorization:'Bearer '+env.COLAB_API_TOKEN}:{})},signal:AbortSignal.timeout(20000)});
+        const data=await response.json().catch(()=>({}));
+        return json(data,response.status===200?200:response.status);
+      } catch { return json({ok:false,message:'Não foi possível consultar o treinamento no Colab.'},502); }
+    }
+    if (url.pathname === '/api/videos/generate-svd' && request.method === 'POST') {
+      if (!env.COLAB_MODULE2_URL) return json({ok:false,message:'Conecte o runtime GPU do Colab para gerar vídeos com SVD.'},503);
+      let body; try { body=await request.json(); } catch { return json({ok:false,message:'Envie a imagem em JSON.'},400); }
+      if (!body.image && !body.referenceImage) return json({ok:false,message:'Envie uma imagem de referência.'},400);
+      try {
+        const endpoint=normalizeColabEndpoint(env.COLAB_MODULE2_URL).replace(/\/generate_image$/,'')+'/generate_video';
+        const response=await fetch(endpoint,{method:'POST',headers:{'content-type':'application/json','accept':'application/json',...(env.COLAB_API_TOKEN?{authorization:'Bearer '+env.COLAB_API_TOKEN}:{})},body:JSON.stringify(body),signal:AbortSignal.timeout(1800000)});
+        const data=await response.json().catch(()=>({}));
+        return json(data,response.status===200?200:response.status);
+      } catch { return json({ok:false,message:'Não foi possível concluir a geração de vídeo no Colab.'},502); }
     }
     if (url.pathname === '/api/influencers/reference-from-url' && request.method === 'POST') {
       let body;
@@ -297,16 +328,7 @@ export default {
         if (!/^[A-Za-z0-9_-]{8,128}$/.test(identityId)) return json({ok:false,message:'O Colab respondeu, mas não devolveu um identityId válido.'},502);
         return json({ok:true,identityId,status:result.status || 'success',message:result.message || 'Identidade registrada com sucesso.',mode},200,{'set-cookie':await identityCookie(identityId)});
       } catch (error) {
-        if (env.AI) {
-          try {
-            const generated = await env.AI.run('@cf/black-forest-labs/flux-1-schnell',{prompt,steps:4});
-            if (generated && generated.image) {
-              const binary = Uint8Array.from(atob(generated.image),c=>c.charCodeAt(0));
-              return new Response(binary,{status:200,headers:{'content-type':'image/png','cache-control':'no-store','x-content-type-options':'nosniff'}});
-            }
-          } catch (_) {}
-        }
-        return json({ok:false,message:String(error && error.message || '').includes('HTTPS') ? 'O endpoint do Colab precisa usar HTTPS.' : 'Não foi possível conectar ao Colab nem ao motor de IA.'},502);
+        return json({ok:false,message:String(error && error.message || '').includes('HTTPS') ? 'O endpoint do Colab precisa usar HTTPS.' : 'Não foi possível conectar ao Colab para registrar a identidade e salvar a foto de referência.'},502);
       }
     }
     if (url.pathname === '/api/products/trending' && request.method === 'GET') {
