@@ -26,6 +26,12 @@ def install_requirements(path, label, cwd=None):
         if any(package == item or package.startswith(item+"-") for item in blocked):
             print(f"SKIP {label}: {stripped}")
             continue
+        # Kohya pins NumPy 1.x and SciPy 1.11.4, which have no compatible
+        # wheels for the Colab Python 3.13 runtime. Keep Colab's working
+        # NumPy/SciPy versions instead of forcing an impossible source build.
+        if label == "kohya" and package in ("numpy", "scipy"):
+            print(f"SKIP {label} (use Colab-compatible version): {stripped}")
+            continue
         lines.append(line)
     temp = Path("/tmp") / f"uvc-{label}-requirements.txt"
     temp.write_text("\n".join(lines))
