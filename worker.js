@@ -106,11 +106,7 @@ export default {
         if (!/^[A-Za-z0-9_-]{8,128}$/.test(identityId)) return json({ok:false,message:'O Colab respondeu, mas não devolveu um identityId válido.'},502);
         return json({ok:true,identityId,status:result.status || 'accepted',mode:body.mode},200,{'set-cookie':await identityCookie(identityId)});
       } catch (error) {
-        if (env.AI) {
-          const identityId = crypto.randomUUID().replace(/-/g,'');
-          return json({ok:true,identityId,status:'registered',message:'Identidade registrada para geração por IA.',mode},200,{'set-cookie':await identityCookie(identityId)});
-        }
-        return json({ok:false,message:'Não foi possível conectar ao Colab e o motor de IA não está disponível.'},502);
+        return json({ok:false,message:'Não foi possível conectar ao Colab para salvar a identidade no Google Drive. Confira se o runtime está ativo.'},502);
       }
     }
     // Módulo 2: usa ComfyUI quando conectado; caso contrário, usa o motor de IA do Worker.
@@ -196,7 +192,7 @@ export default {
       if (!Array.isArray(body.images) || !body.images.length || body.images.length>50) return json({ok:false,message:'Envie de 1 a 50 imagens para o dataset.'},400);
       if (!env.COLAB_MODULE1_URL) return json({ok:false,message:'Conecte o runtime GPU do Colab.'},503);
       try {
-        const base=normalizeColabEndpoint(env.COLAB_MODULE1_URL).replace('/create_identity','');
+        const base=normalizeColabEndpoint(env.COLAB_MODULE1_URL).replace(/\/create_identity$/,'');
         const response=await fetch(base+'/identity/'+encodeURIComponent(iid)+'/dataset',{method:'POST',headers:{'content-type':'application/json','accept':'application/json',...(env.COLAB_API_TOKEN?{authorization:'Bearer '+env.COLAB_API_TOKEN}:{})},body:JSON.stringify(body),signal:AbortSignal.timeout(120000)});
         const data=await response.json().catch(()=>({}));
         return json(data,response.status===200?200:response.status);
@@ -207,7 +203,8 @@ export default {
       let body; try { body=await request.json(); } catch { return json({ok:false,message:'Envie a imagem em JSON.'},400); }
       if (!body.image && !body.referenceImage) return json({ok:false,message:'Envie uma imagem de referência.'},400);
       try {
-        const endpoint=normalizeColabEndpoint(env.COLAB_MODULE2_URL).replace(/\/generate_image$/,'')+'/generate_video';
+        const videoBase=env.COLAB_MODULE2_URL || env.COLAB_MODULE1_URL;
+        const endpoint=normalizeColabEndpoint(videoBase).replace(/\/(generate_image|create_identity)$/,'')+'/generate_video';
         const response=await fetch(endpoint,{method:'POST',headers:{'content-type':'application/json','accept':'application/json',...(env.COLAB_API_TOKEN?{authorization:'Bearer '+env.COLAB_API_TOKEN}:{})},body:JSON.stringify(body),signal:AbortSignal.timeout(1800000)});
         const data=await response.json().catch(()=>({}));
         return json(data,response.status===200?200:response.status);
