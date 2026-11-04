@@ -67,8 +67,13 @@ for name,url in nodes.items():
     install_requirements(dest/"requirements.txt", name.lower().replace("-","_"))
 
 kohya=Path("/content/kohya_ss")
-if not (kohya/"sd-scripts"/"train_network.py").exists():
+if not (kohya/".git").exists():
     run(["git","clone","https://github.com/bmaltais/kohya_ss.git",str(kohya)])
+# O sd-scripts é um submódulo do Kohya_ss. Sem inicializá-lo, o pip falha
+# ao encontrar a linha "-e ./sd-scripts" no requirements.txt.
+run(["git","submodule","update","--init","--recursive"], cwd=kohya)
+if not (kohya/"sd-scripts"/"train_network.py").exists():
+    raise RuntimeError("O submódulo sd-scripts do Kohya_ss não foi baixado corretamente.")
 # Instala dependências não-PyTorch do Kohya sem substituir o torch do runtime.
 install_requirements(kohya/"requirements.txt", "kohya")
 
