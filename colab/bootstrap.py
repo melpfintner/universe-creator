@@ -35,7 +35,7 @@ def install_requirements(path, label, cwd=None):
             continue
         # Preserve Colab's shared Google/TensorFlow runtime dependencies.
         # The old Kohya pins downgrade these packages and break preinstalled services.
-        if label == "kohya" and package in ("numpy", "scipy", "aiofiles", "protobuf"):
+        if package in ("numpy", "scipy", "aiofiles", "protobuf"):
             print(f"SKIP {label} (use Colab-compatible version): {stripped}")
             continue
         lines.append(line)
