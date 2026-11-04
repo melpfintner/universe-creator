@@ -2,7 +2,7 @@ import os, io, json, time, uuid, base64, shutil, subprocess, threading
 from pathlib import Path
 from typing import Optional
 import requests
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException\nfrom fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 ROOT=Path("/content/drive/MyDrive/UniVerseCreator")
@@ -14,8 +14,20 @@ CONTROLNET=os.getenv("COMFYUI_CONTROLNET","control_v11p_sd15_openpose.pth")
 MOTION_MODULE=os.getenv("COMFYUI_MOTION_MODULE","v3_sd15_mm.ckpt")
 SD15_CHECKPOINT=os.getenv("COMFYUI_SD15_CHECKPOINT","v1-5-pruned-emaonly-fp16.safetensors")
 SVD_CHECKPOINT=os.getenv("COMFYUI_SVD_CHECKPOINT","")
-app=FastAPI(title="UniVerse Creator Engine",version="3.0")
+app=FastAPI(title="UniVerse Creator Engine",version="3.1")
 jobs={}
+
+@app.middleware("http")
+async def require_api_token(request, call_next):
+    # Health checks are public; generation, identity and training routes require
+    # the persistent token created by start_runtime.py.
+    if request.url.path in ("/", "/health"):
+        return await call_next(request)
+    token=os.getenv("UVC_API_TOKEN","")
+    supplied=request.headers.get("authorization","")
+    if not token or supplied != "Bearer "+token:
+        return JSONResponse(status_code=401, content={"detail":"API token ausente ou inválido."})
+    return await call_next(request)
 
 class IdentityIn(BaseModel):
     module:Optional[str]=None; action:Optional[str]=None
