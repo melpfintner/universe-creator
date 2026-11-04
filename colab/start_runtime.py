@@ -95,7 +95,7 @@ url = None
 for _ in range(90):
     try:
         log = tunnel_log_path.read_text(errors="ignore")
-        matches = re.findall(r"https://[a-z0-9-]+\\.trycloudflare\\.com", log)
+        matches = re.findall(r"https://[a-z0-9-]+\.trycloudflare\\.com", log)
         if matches:
             url = matches[-1]
             break
@@ -106,12 +106,12 @@ for _ in range(90):
 if not url:
     raise SystemExit("O túnel não forneceu URL. Consulte logs/cloudflared.log no Google Drive.")
 
-print("\\n=== UNIVERSE CREATOR GPU RUNTIME ===")
+print("\n=== UNIVERSE CREATOR GPU RUNTIME ===")
 print("API:", url)
 print("HEALTH:", url + "/health")
 print("TOKEN:", token)
-print("\\nConfigure no Worker Cloudflare:")
+print("\nConfigure no Worker Cloudflare:")
 print("COLAB_MODULE1_URL = " + url)
 print("COLAB_MODULE2_URL = " + url)
 print("COLAB_API_TOKEN = o valor exibido em TOKEN")
-print("\\nMantenha esta sessão do Colab ativa. A URL muda quando o túnel reinicia.")
+print("\nMantenha esta sessão do Colab ativa. A URL muda quando o túnel reinicia.")
