@@ -189,8 +189,21 @@ export default {
         return json(data,response.status===200?200:response.status);
       } catch { return json({ok:false,message:'Não foi possível consultar o treinamento no Colab.'},502); }
     }
+    if (url.pathname.startsWith('/api/influencers/dataset/') && request.method === 'POST') {
+      const iid=decodeURIComponent(url.pathname.split('/').pop()||'');
+      if (!/^[A-Za-z0-9_-]{8,128}$/.test(iid)) return json({ok:false,message:'identityId inválido.'},400);
+      let body; try { body=await request.json(); } catch { return json({ok:false,message:'Envie as imagens em JSON.'},400); }
+      if (!Array.isArray(body.images) || !body.images.length || body.images.length>50) return json({ok:false,message:'Envie de 1 a 50 imagens para o dataset.'},400);
+      if (!env.COLAB_MODULE1_URL) return json({ok:false,message:'Conecte o runtime GPU do Colab.'},503);
+      try {
+        const base=normalizeColabEndpoint(env.COLAB_MODULE1_URL).replace(/\\/create_identity$/,'');
+        const response=await fetch(base+'/identity/'+encodeURIComponent(iid)+'/dataset',{method:'POST',headers:{'content-type':'application/json','accept':'application/json',...(env.COLAB_API_TOKEN?{authorization:'Bearer '+env.COLAB_API_TOKEN}:{})},body:JSON.stringify(body),signal:AbortSignal.timeout(120000)});
+        const data=await response.json().catch(()=>({}));
+        return json(data,response.status===200?200:response.status);
+      } catch { return json({ok:false,message:'Não foi possível enviar as imagens para o Google Drive.'},502); }
+    }
     if (url.pathname === '/api/videos/generate-svd' && request.method === 'POST') {
-      if (!env.COLAB_MODULE2_URL) return json({ok:false,message:'Conecte o runtime GPU do Colab para gerar vídeos com SVD.'},503);
+      if (!env.COLAB_MODULE1_URL && !env.COLAB_MODULE2_URL) return json({ok:false,message:'Conecte o runtime GPU do Colab para gerar vídeos com SVD.'},503);
       let body; try { body=await request.json(); } catch { return json({ok:false,message:'Envie a imagem em JSON.'},400); }
       if (!body.image && !body.referenceImage) return json({ok:false,message:'Envie uma imagem de referência.'},400);
       try {
