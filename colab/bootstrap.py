@@ -30,12 +30,12 @@ def install_requirements(path, label, cwd=None):
         # wheels for the Colab Python 3.13 runtime. Keep Colab's working
         # NumPy/SciPy versions instead of forcing an impossible source build.
         if label == "kohya" and package == "onnx":
-            # ONNX 1.19 does not provide a standard CPython 3.13 x86_64 wheel.
-            # ONNX 1.20.1 provides cp312-abi3 manylinux wheels usable on CPython 3.13.
-            print(f"REPLACE {label}: {stripped} -> onnx==1.20.1 (CPython 3.12+ abi3 wheel)")
+            print(f"REPLACE {label}: {stripped} -> onnx==1.20.1")
             lines.append("onnx==1.20.1")
             continue
-        if label == "kohya" and package in ("numpy", "scipy"):
+        # Preserve Colab's shared Google/TensorFlow runtime dependencies.
+        # The old Kohya pins downgrade these packages and break preinstalled services.
+        if label == "kohya" and package in ("numpy", "scipy", "aiofiles", "protobuf"):
             print(f"SKIP {label} (use Colab-compatible version): {stripped}")
             continue
         lines.append(line)
@@ -88,9 +88,33 @@ if not (kohya/"sd-scripts"/"train_network.py").exists():
     raise RuntimeError("O submódulo sd-scripts do Kohya_ss não foi baixado corretamente.")
 # Instala dependências não-PyTorch do Kohya sem substituir o torch do runtime.
 install_requirements(kohya/"requirements.txt", "kohya", cwd=kohya)
+# Restore versions compatible with the current Colab Google/TensorFlow stack.
+run([sys.executable, "-m", "pip", "install", "--upgrade", "aiofiles>=24.1,<25", "protobuf>=6.33.5,<7"])
 
 for folder in ["checkpoints","controlnet","loras","vae","clip_vision","ipadapter","animatediff_models"]:
     (Path("/content/ComfyUI/models")/folder).mkdir(parents=True,exist_ok=True)
+
+# Download a practical SD 1.5 stack for the Colab T4 (16 GB VRAM).
+def download_model(url, destination):
+    destination = Path(destination)
+    if destination.exists() and destination.stat().st_size > 100_000_000:
+        print(f"MODEL OK: {destination.name}", flush=True)
+        return
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    run(["wget", "-c", "--show-progress", "-O", str(destination), url])
+
+download_model(
+    "https://huggingface.co/runwayml/stable-diffusion-v1-5/resolve/main/v1-5-pruned-emaonly.ckpt",
+    "/content/ComfyUI/models/checkpoints/v1-5-pruned-emaonly.ckpt"
+)
+download_model(
+    "https://huggingface.co/lllyasviel/ControlNet-v1-1/resolve/main/control_v11p_sd15_openpose.pth",
+    "/content/ComfyUI/models/controlnet/control_v11p_sd15_openpose.pth"
+)
+download_model(
+    "https://huggingface.co/conrevo/AnimateDiff-A1111/resolve/main/motion_module/mm_sd15_v3.safetensors",
+    "/content/ComfyUI/models/animatediff_models/mm_sd15_v3.safetensors"
+)
 
 gpu=subprocess.run(["nvidia-smi"],capture_output=True,text=True)
 if gpu.returncode != 0:
@@ -99,6 +123,7 @@ print(gpu.stdout[:2500])
 print("\nINSTALAÇÃO BASE CONCLUÍDA.")
 print("O PyTorch/CUDA existente foi preservado. Confira os avisos de dependências incompatíveis.")
 print("Pesos de modelos NÃO são baixados automaticamente. Adicione apenas arquivos com licença adequada.")
-print("Configure COMFYUI_CHECKPOINT, COMFYUI_SD15_CHECKPOINT, COMFYUI_CONTROLNET, COMFYUI_MOTION_MODULE e COMFYUI_SVD_CHECKPOINT.")
+print("Stack SD1.5, ControlNet OpenPose e AnimateDiff v3 baixados para o runtime T4.")
+print("SVD permanece opcional: o checkpoint oficial exige aceite de licença/termos na Hugging Face.")
 print("Inicie o ComfyUI em uma célula: !python /content/ComfyUI/main.py --listen 127.0.0.1 --port 8188")
 print("Inicie a API em outra: !uvicorn uvc_engine:app --app-dir /content/universe-creator/colab --host 0.0.0.0 --port 8000")
