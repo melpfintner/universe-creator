@@ -120,10 +120,28 @@ export default {
       try {
         if (contentType.includes('multipart/form-data')) {
           const form = await request.formData();
-          if (identityId && !form.has('identityId')) form.set('identityId', identityId);
-          if (!form.has('module')) form.set('module', '2');
-          if (!form.has('action')) form.set('action', 'generate_image');
-          outgoingBody = form;
+          const input = {};
+          for (const [key,value] of form.entries()) {
+            if (value instanceof File) {
+              if (!value.size) continue;
+              if (!['image/jpeg','image/png','image/webp'].includes(value.type)) return json({ok:false,message:'Envie imagens JPG, PNG ou WEBP.'},415);
+              if (value.size > 10 * 1024 * 1024) return json({ok:false,message:'Cada imagem deve ter até 10 MB.'},413);
+              const bytes = new Uint8Array(await value.arrayBuffer());
+              let binary = '';
+              for (let i=0;i<bytes.length;i+=0x8000) binary += String.fromCharCode(...bytes.subarray(i,i+0x8000));
+              input[key] = 'data:'+(value.type || 'image/png')+';base64,'+btoa(binary);
+            } else {
+              input[key] = value;
+            }
+          }
+          input.module = 2;
+          input.action = 'generate_image';
+          input.identityId = input.identityId || identityId || null;
+          if (!input.controlImage && input.control) input.controlImage = input.control;
+          if (!input.referenceImage && input.reference) input.referenceImage = input.reference;
+          if (!input.prompt || String(input.prompt).trim().length < 8) return json({ok:false,message:'Informe um prompt com pelo menos 8 caracteres.'},400);
+          outgoingBody = JSON.stringify(input);
+          headers['content-type'] = 'application/json';
         } else if (contentType.includes('application/json')) {
           const body = await request.json();
           const prompt = String(body.prompt || '').trim();
