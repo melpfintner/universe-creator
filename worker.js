@@ -86,7 +86,7 @@ export default {
       return json({ok:true,identityId:null},200,{'set-cookie':identityCookieName+'=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0'});
     }
     if (url.pathname === '/api/influencers/identity/create' && request.method === 'POST') {
-      if (!env.COLAB_MODULE1_URL) return json({ok:false,message:'Configure COLAB_MODULE1_URL nos segredos/variáveis do Cloudflare para conectar o endpoint do Módulo 1.'},503);
+      if (!env.COLAB_MODULE1_URL && !env.AI) return json({ok:false,message:'Configure o motor de IA do Cloudflare ou conecte o Colab.'},503);
       let body;
       try { body = await request.json(); } catch { return json({ok:false,message:'Envie um JSON válido com os dados da nova influencer.'},400); }
       const prompt = String(body.prompt || '').trim();
@@ -97,6 +97,16 @@ export default {
       try {
         const headers = {'content-type':'application/json','accept':'application/json'};
         if (env.COLAB_API_TOKEN) headers.authorization = 'Bearer '+env.COLAB_API_TOKEN;
+        if (!env.COLAB_MODULE1_URL) {
+          const identityId = crypto.randomUUID().replace(/-/g,'');
+          return json({ok:true,identityId,status:'registered',message:'Identidade registrada para esta sessão. A geração será feita pelo motor de IA.' ,mode},200,{'set-cookie':await identityCookie(identityId)});
+        }
+        if (!env.COLAB_MODULE1_URL) {
+          const generated = await env.AI.run('@cf/black-forest-labs/flux-1-schnell',{prompt,steps:4});
+          if (!generated || !generated.image) return json({ok:false,message:'O motor de IA não devolveu uma imagem.'},502);
+          const binary = Uint8Array.from(atob(generated.image),c=>c.charCodeAt(0));
+          return new Response(binary,{status:200,headers:{'content-type':'image/png','cache-control':'no-store','x-content-type-options':'nosniff'}});
+        }
         const endpoint = normalizeColabEndpoint(env.COLAB_MODULE1_URL);
         const upstream = await fetch(endpoint,{method:'POST',headers,body:JSON.stringify(payload),signal:AbortSignal.timeout(90000)});
         const result = await upstream.json().catch(()=>({}));
@@ -105,12 +115,16 @@ export default {
         if (!/^[A-Za-z0-9_-]{8,128}$/.test(identityId)) return json({ok:false,message:'O Colab respondeu, mas não devolveu um identityId válido.'},502);
         return json({ok:true,identityId,status:result.status || 'accepted',mode:body.mode},200,{'set-cookie':await identityCookie(identityId)});
       } catch (error) {
-        return json({ok:false,message:'Não foi possível conectar ao Colab. Verifique COLAB_MODULE1_URL e se o notebook está ativo.'},502);
+        if (env.AI) {
+          const identityId = crypto.randomUUID().replace(/-/g,'');
+          return json({ok:true,identityId,status:'registered',message:'Identidade registrada para geração por IA.',mode},200,{'set-cookie':await identityCookie(identityId)});
+        }
+        return json({ok:false,message:'Não foi possível conectar ao Colab e o motor de IA não está disponível.'},502);
       }
     }
-    // Módulo 2: encaminha a criação de imagem ao endpoint próprio do Colab.
+    // Módulo 2: usa ComfyUI quando conectado; caso contrário, usa o motor de IA do Worker.
     if (url.pathname === '/api/images/generate' && request.method === 'POST') {
-      if (!env.COLAB_MODULE2_URL) return json({ok:false,message:'Configure COLAB_MODULE2_URL no Cloudflare com o endpoint de geração de imagens do notebook.'},503);
+      if (!env.COLAB_MODULE2_URL && !env.AI) return json({ok:false,message:'O motor de geração não está conectado. Ative o Cloudflare AI ou o Colab.'},503);
       const contentType = request.headers.get('content-type') || '';
       const identityId = await readIdentityCookie();
       let outgoingBody;
@@ -131,6 +145,13 @@ export default {
           headers['content-type'] = 'application/json';
         } else {
           return json({ok:false,message:'Envie os dados da imagem em JSON ou multipart/form-data.'},415);
+        }
+        if (!env.COLAB_MODULE2_URL) {
+          if (!env.AI || !contentType.includes('application/json')) return json({ok:false,message:'Para gerar sem Colab, envie o prompt em JSON e mantenha o Cloudflare AI ativo.'},503);
+          const input = JSON.parse(outgoingBody);
+          const generated = await env.AI.run('@cf/black-forest-labs/flux-1-schnell',{prompt:input.prompt,steps:4});
+          if (!generated || !generated.image) return json({ok:false,message:'O motor de IA não devolveu uma imagem.'},502);
+          return json({ok:true,status:'succeeded',imageBase64:generated.image,mimeType:'image/png',outputId:crypto.randomUUID(),engine:'cloudflare-workers-ai'});
         }
         const endpoint = normalizeColabEndpoint(env.COLAB_MODULE2_URL);
         const upstream = await fetch(endpoint,{method:'POST',headers,body:outgoingBody,signal:AbortSignal.timeout(120000)});
@@ -248,7 +269,7 @@ export default {
     }
     // Ponte do Módulo 1: recebe multipart do frontend e encaminha JSON ao Colab.
     if (url.pathname === '/api/influencers/generate' && request.method === 'POST') {
-      if (!env.COLAB_MODULE1_URL) return json({ok:false,message:'Configure COLAB_MODULE1_URL no Cloudflare para conectar o Módulo 1.'},503);
+      if (!env.COLAB_MODULE1_URL && !env.AI) return json({ok:false,message:'O motor de identidade não está conectado.'},503);
       let form;
       try { form = await request.formData(); }
       catch { return json({ok:false,message:'Não foi possível ler a foto enviada. Selecione a imagem novamente.'},400); }
@@ -282,7 +303,16 @@ export default {
         if (!/^[A-Za-z0-9_-]{8,128}$/.test(identityId)) return json({ok:false,message:'O Colab respondeu, mas não devolveu um identityId válido.'},502);
         return json({ok:true,identityId,status:result.status || 'success',message:result.message || 'Identidade registrada com sucesso.',mode},200,{'set-cookie':await identityCookie(identityId)});
       } catch (error) {
-        return json({ok:false,message:String(error && error.message || '').includes('HTTPS') ? 'O endpoint do Colab precisa usar HTTPS.' : 'Não foi possível conectar ao Colab. Verifique se o notebook do Módulo 1 está ativo.'},502);
+        if (env.AI) {
+          try {
+            const generated = await env.AI.run('@cf/black-forest-labs/flux-1-schnell',{prompt,steps:4});
+            if (generated && generated.image) {
+              const binary = Uint8Array.from(atob(generated.image),c=>c.charCodeAt(0));
+              return new Response(binary,{status:200,headers:{'content-type':'image/png','cache-control':'no-store','x-content-type-options':'nosniff'}});
+            }
+          } catch (_) {}
+        }
+        return json({ok:false,message:String(error && error.message || '').includes('HTTPS') ? 'O endpoint do Colab precisa usar HTTPS.' : 'Não foi possível conectar ao Colab nem ao motor de IA.'},502);
       }
     }
     if (url.pathname === '/api/products/trending' && request.method === 'GET') {
