@@ -99,7 +99,7 @@ export default {
         if (env.COLAB_API_TOKEN) headers.authorization = 'Bearer '+env.COLAB_API_TOKEN;
         if (!env.COLAB_MODULE1_URL) {
           const identityId = crypto.randomUUID().replace(/-/g,'');
-          return json({ok:true,identityId,status:'registered',message:'Identidade registrada para esta sessão. A geração será feita pelo motor de IA.' ,body.mode},200,{'set-cookie':await identityCookie(identityId)});
+          return json({ok:true,identityId,status:'registered',message:'Identidade registrada para esta sessão. A geração será feita pelo motor de IA.' ,mode:body.mode},200,{'set-cookie':await identityCookie(identityId)});
         }
         const endpoint = normalizeColabEndpoint(env.COLAB_MODULE1_URL);
         const upstream = await fetch(endpoint,{method:'POST',headers,body:JSON.stringify(payload),signal:AbortSignal.timeout(90000)});
