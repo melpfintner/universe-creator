@@ -83,7 +83,7 @@ def health():
 
 @app.post("/create_identity")
 def create_identity(data: IdentityIn):
-    identity_id=data.identityId or uuid.uuid4().hex
+    if data.mode not in ("influencer","my_identity","ai_identity"):\n        raise HTTPException(400,"Modo de identidade inválido.")\n    identity_id=data.identityId or uuid.uuid4().hex
     folder=IDENTITIES/identity_id
     folder.mkdir(parents=True,exist_ok=True)
     metadata={"identityId":identity_id,"mode":data.mode,"name":data.name,"prompt":data.prompt,"createdAt":time.time(),"status":"registered"}
