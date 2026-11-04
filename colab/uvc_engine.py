@@ -158,40 +158,104 @@ def generate_image(data:ImageIn):
     return {"ok":True,"status":"succeeded","imageBase64":base64.b64encode(image).decode(),"mimeType":"image/png","outputId":oid,"drivePath":str(out),"promptId":pid,"engine":"ComfyUI"}
 @app.post("/train_lora")
 def train_lora(payload:dict):
-    iid=str(payload.get("identityId","")); folder=IDENTITIES/iid
-    if not iid or not (folder/"identity.json").exists(): raise HTTPException(404,"Identidade não encontrada.")
+    iid=str(payload.get("identityId","")).strip()
+    folder=IDENTITIES/iid
+    if not iid or not (folder/"identity.json").exists():
+        raise HTTPException(404,"Identidade não encontrada.")
     ds=folder/"dataset"
-    imgs=[p for p in ds.glob("*") if p.suffix.lower() in (".png",".jpg",".jpeg",".webp")] if ds.exists() else []
-    if len(imgs)<5: raise HTTPException(400,"O treinamento LoRA exige pelo menos 5 imagens na pasta dataset.")
+    imgs=sorted([p for p in ds.glob("*") if p.suffix.lower() in (".png",".jpg",".jpeg",".webp")]) if ds.exists() else []
+    if len(imgs)<5:
+        raise HTTPException(400,"O treinamento LoRA exige pelo menos 5 imagens no conjunto de treinamento.")
     script=Path("/content/kohya_ss/sd-scripts/train_network.py")
-    if not script.exists(): raise HTTPException(503,"Kohya_ss não está instalado neste runtime.")
+    if not script.exists():
+        raise HTTPException(503,"Kohya_ss/sd-scripts não está instalado neste runtime. Execute o bootstrap atualizado.")
     base=Path("/content/ComfyUI/models/checkpoints")/CHECKPOINT
-    if not base.exists(): raise HTTPException(503,"Checkpoint configurado não encontrado.")
-    meta=json.loads((folder/"identity.json").read_text()); token="uvc_"+iid[:8]
-    train_root=folder/"kohya_dataset"; train_root.mkdir(exist_ok=True)
-    train_dir=train_root/("10_"+token); train_dir.mkdir(exist_ok=True)
+    if not base.exists():
+        raise HTTPException(503,"Checkpoint SD1.5 configurado não encontrado.")
+    if iid in jobs and Path(f"/proc/{jobs[iid].get('pid',0)}").exists():
+        raise HTTPException(409,"Já existe um treinamento em andamento para esta identidade.")
+    try:
+        meta=json.loads((folder/"identity.json").read_text())
+    except Exception:
+        raise HTTPException(500,"Não foi possível ler os dados da identidade.")
+    token="uvc_"+iid[:8]
+    train_root=folder/"kohya_dataset"
+    train_root.mkdir(exist_ok=True)
+    train_dir=train_root/("10_"+token)
+    train_dir.mkdir(exist_ok=True)
+    copied=0
     for p in imgs:
-        shutil.copy2(p,train_dir/p.name)
+        target=train_dir/p.name
+        if p.resolve()!=target.resolve():
+            shutil.copy2(p,target)
         caption=train_dir/(p.stem+".txt")
-        if not caption.exists(): caption.write_text(token+", "+meta.get("prompt","").replace("\n"," ")[:500])
-    output=LORAS/iid; output.mkdir(exist_ok=True)
-    args=["python",str(script),"--pretrained_model_name_or_path",str(base),"--train_data_dir",str(train_root),"--output_dir",str(output),"--output_name",iid,"--resolution","1024,1024","--network_module","networks.lora","--network_dim",str(payload.get("networkDim",32)),"--network_alpha",str(payload.get("networkAlpha",16)),"--train_batch_size","1","--max_train_epochs",str(payload.get("epochs",8)),"--learning_rate","1e-4","--optimizer_type","AdamW8bit","--mixed_precision","fp16","--save_model_as","safetensors"]
+        if not caption.exists():
+            caption.write_text(token+", "+str(meta.get("prompt","")).replace("\\n"," ")[:500],encoding="utf-8")
+        copied+=1
+    output=LORAS/iid
+    output.mkdir(exist_ok=True)
+    epochs=max(1,min(30,int(payload.get("epochs",8))))
+    dim=max(4,min(128,int(payload.get("networkDim",32))))
+    alpha=max(1,min(dim,int(payload.get("networkAlpha",16))))
+    resolution=max(512,min(768,int(payload.get("resolution",512))//64*64))
+    args=[
+        sys.executable,str(script),
+        "--pretrained_model_name_or_path",str(base),
+        "--train_data_dir",str(train_root),
+        "--output_dir",str(output),
+        "--output_name",iid,
+        "--resolution",f"{resolution},{resolution}",
+        "--network_module","networks.lora",
+        "--network_dim",str(dim),
+        "--network_alpha",str(alpha),
+        "--train_batch_size","1",
+        "--max_train_epochs",str(epochs),
+        "--learning_rate",str(payload.get("learningRate","1e-4")),
+        "--unet_lr",str(payload.get("learningRate","1e-4")),
+        "--text_encoder_lr","5e-5",
+        "--optimizer_type","AdamW8bit",
+        "--mixed_precision","fp16",
+        "--save_model_as","safetensors",
+        "--caption_extension",".txt",
+        "--shuffle_caption",
+        "--keep_tokens","1",
+        "--cache_latents",
+        "--gradient_checkpointing",
+        "--max_data_loader_n_workers","2",
+        "--save_every_n_epochs","1",
+        "--save_last_n_epochs","1"
+    ]
     log=output/"training.log"
     try:
-        with log.open("w") as fp: proc=subprocess.Popen(args,stdout=fp,stderr=subprocess.STDOUT,start_new_session=True)
-    except Exception as e: raise HTTPException(500,"Não foi possível iniciar Kohya_ss: "+str(e)[:200])
-    jobs[iid]={"pid":proc.pid,"log":str(log),"status":"running"}
-    return {"ok":True,"status":"running","identityId":iid,"jobId":iid,"logPath":str(log),"message":"Treinamento LoRA iniciado no runtime."}
+        with log.open("w",encoding="utf-8") as fp:
+            proc=subprocess.Popen(args,cwd=str(Path("/content/kohya_ss")),stdout=fp,stderr=subprocess.STDOUT,start_new_session=True)
+    except Exception as e:
+        raise HTTPException(500,"Não foi possível iniciar Kohya_ss: "+str(e)[:200])
+    jobs[iid]={"pid":proc.pid,"log":str(log),"status":"running","startedAt":time.time(),"images":copied,"epochs":epochs}
+    return {"ok":True,"status":"running","identityId":iid,"jobId":iid,"images":copied,"epochs":epochs,"networkDim":dim,"resolution":resolution,"logPath":str(log),"message":"Treinamento LoRA iniciado no Kohya_ss. Acompanhe o endpoint de status."}
+
 @app.get("/train_lora/{identity_id}/status")
 def train_status(identity_id:str):
-    job=jobs.get(identity_id); output=LORAS/identity_id
-    if not job: return {"ok":True,"status":"unknown","loraReady":any(output.glob("*.safetensors"))}
-    alive=Path(f"/proc/{job['pid']}").exists()
+    job=jobs.get(identity_id)
+    output=LORAS/identity_id
+    ready=sorted(output.glob("*.safetensors")) if output.exists() else []
+    log_path=Path(job["log"]) if job and job.get("log") else output/"training.log"
     tail=""
-    try: tail="\n".join(Path(job["log"]).read_text(errors="ignore").splitlines()[-15:])
-    except: pass
-    ready=list(output.glob("*.safetensors"))
-    return {"ok":True,"status":"running" if alive else ("succeeded" if ready else "failed"),"loraReady":bool(ready),"files":[p.name for p in ready],"logTail":tail}
+    try:
+        tail="\\n".join(log_path.read_text(errors="ignore").splitlines()[-20:])
+    except Exception:
+        pass
+    if not job:
+        return {"ok":True,"status":"unknown","loraReady":bool(ready),"files":[p.name for p in ready],"logTail":tail}
+    alive=Path(f"/proc/{job['pid']}").exists()
+    if alive:
+        status="running"
+    elif ready:
+        status="succeeded"
+    else:
+        status="failed"
+    return {"ok":True,"status":status,"loraReady":bool(ready),"files":[p.name for p in ready],"images":job.get("images"),"epochs":job.get("epochs"),"logTail":tail}
+    
 @app.post("/generate_video_animatediff")
 def generate_video_animatediff(payload:dict):
     if not MOTION_MODULE: raise HTTPException(503,"AnimateDiff não está configurado. Instale o motion module SD1.5.")
