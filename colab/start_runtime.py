@@ -95,7 +95,7 @@ url = None
 for _ in range(90):
     try:
         log = tunnel_log_path.read_text(errors="ignore")
-        matches = re.findall(r"https://[a-z0-9-]+\.trycloudflare\\.com", log)
+        matches = re.findall(r"https://[a-z0-9-]+\.trycloudflare\.com", log)
         if matches:
             url = matches[-1]
             break
