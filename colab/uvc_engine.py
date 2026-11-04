@@ -90,7 +90,7 @@ def health():
     try:
         r=requests.get(COMFY+"/system_stats",timeout=8); r.raise_for_status()
         models=[p.name for p in (Path("/content/ComfyUI/models/checkpoints")).glob("*.safetensors")]
-        return {"status":"healthy","drive":ROOT.exists(),"comfyui":True,"checkpoint":CHECKPOINT in models,"controlnet_configured":bool(CONTROLNET),"animatediff_configured":bool(MOTION_MODULE),"svd_configured":bool(SVD_CHECKPOINT),"kohya_installed":Path("/content/kohya_ss/sd-scripts/train_network.py").exists()}
+        return {"status":"healthy","drive":ROOT.exists(),"comfyui":True,"checkpoint":CHECKPOINT in models,"sd15_checkpoint":SD15_CHECKPOINT in models,"controlnet_configured":bool(CONTROLNET),"animatediff_configured":bool(MOTION_MODULE),"svd_configured":bool(SVD_CHECKPOINT),"kohya_installed":Path("/content/kohya_ss/sd-scripts/train_network.py").exists()}
     except Exception as e: return {"status":"degraded","drive":ROOT.exists(),"comfyui":False,"error":str(e)[:180]}
 @app.post("/create_identity")
 def create_identity(data:IdentityIn):
