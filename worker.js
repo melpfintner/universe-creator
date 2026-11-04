@@ -198,6 +198,18 @@ export default {
         return json(data,response.status===200?200:response.status);
       } catch { return json({ok:false,message:'Não foi possível enviar as imagens para o Google Drive.'},502); }
     }
+    if (url.pathname === '/api/videos/generate-animatediff' && request.method === 'POST') {
+      if (!env.COLAB_MODULE1_URL && !env.COLAB_MODULE2_URL) return json({ok:false,message:'Conecte o runtime GPU do Colab para gerar vídeos com AnimateDiff.'},503);
+      let body; try { body=await request.json(); } catch { return json({ok:false,message:'Envie os dados do vídeo em JSON.'},400); }
+      if (!String(body.prompt || '').trim()) return json({ok:false,message:'Descreva o movimento desejado.'},400);
+      try {
+        const videoBase=env.COLAB_MODULE2_URL || env.COLAB_MODULE1_URL;
+        const endpoint=normalizeColabEndpoint(videoBase).replace(/\/(generate_image|create_identity)$/,'')+'/generate_video_animatediff';
+        const response=await fetch(endpoint,{method:'POST',headers:{'content-type':'application/json','accept':'application/json',...(env.COLAB_API_TOKEN?{authorization:'Bearer '+env.COLAB_API_TOKEN}:{})},body:JSON.stringify(body),signal:AbortSignal.timeout(1800000)});
+        const data=await response.json().catch(()=>({}));
+        return json(data,response.status===200?200:response.status);
+      } catch { return json({ok:false,message:'Não foi possível concluir a geração AnimateDiff no Colab.'},502); }
+    }
     if (url.pathname === '/api/videos/generate-svd' && request.method === 'POST') {
       if (!env.COLAB_MODULE1_URL && !env.COLAB_MODULE2_URL) return json({ok:false,message:'Conecte o runtime GPU do Colab para gerar vídeos com SVD.'},503);
       let body; try { body=await request.json(); } catch { return json({ok:false,message:'Envie a imagem em JSON.'},400); }
