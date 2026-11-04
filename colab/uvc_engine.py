@@ -2,7 +2,8 @@ import os, io, json, time, uuid, base64, shutil, subprocess, threading
 from pathlib import Path
 from typing import Optional
 import requests
-from fastapi import FastAPI, HTTPException\nfrom fastapi.responses import JSONResponse
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 ROOT=Path("/content/drive/MyDrive/UniVerseCreator")
