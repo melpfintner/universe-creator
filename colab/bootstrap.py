@@ -30,8 +30,10 @@ def install_requirements(path, label, cwd=None):
         # wheels for the Colab Python 3.13 runtime. Keep Colab's working
         # NumPy/SciPy versions instead of forcing an impossible source build.
         if label == "kohya" and package == "onnx":
-            print(f"REPLACE {label}: {stripped} -> onnx==1.19.0 (Python 3.13 compatible wheel)")
-            lines.append("onnx==1.19.0")
+            # ONNX 1.19 does not provide a standard CPython 3.13 x86_64 wheel.
+            # ONNX 1.20.1 provides cp312-abi3 manylinux wheels usable on CPython 3.13.
+            print(f"REPLACE {label}: {stripped} -> onnx==1.20.1 (CPython 3.12+ abi3 wheel)")
+            lines.append("onnx==1.20.1")
             continue
         if label == "kohya" and package in ("numpy", "scipy"):
             print(f"SKIP {label} (use Colab-compatible version): {stripped}")
