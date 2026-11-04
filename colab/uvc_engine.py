@@ -90,7 +90,13 @@ def health():
     try:
         r=requests.get(COMFY+"/system_stats",timeout=8); r.raise_for_status()
         models=[p.name for p in (Path("/content/ComfyUI/models/checkpoints")).glob("*.safetensors")]
-        return {"status":"healthy","drive":ROOT.exists(),"comfyui":True,"checkpoint":CHECKPOINT in models,"sd15_checkpoint":SD15_CHECKPOINT in models,"controlnet_configured":bool(CONTROLNET),"animatediff_configured":bool(MOTION_MODULE),"svd_configured":bool(SVD_CHECKPOINT),"kohya_installed":Path("/content/kohya_ss/sd-scripts/train_network.py").exists()}
+        controlnet_ok=bool(CONTROLNET and (Path("/content/ComfyUI/models/controlnet")/CONTROLNET).exists())
+        motion_ok=bool(MOTION_MODULE and (Path("/content/ComfyUI/models/animatediff_models")/MOTION_MODULE).exists())
+        svd_ok=bool(SVD_CHECKPOINT and (Path("/content/ComfyUI/models/checkpoints")/SVD_CHECKPOINT).exists())
+        kohya_ok=Path("/content/kohya_ss/sd-scripts/train_network.py").exists()
+        import torch
+        gpu_ok=torch.cuda.is_available()
+        return {"status":"healthy" if ROOT.exists() and gpu_ok else "degraded","drive":ROOT.exists(),"comfyui":True,"gpu":gpu_ok,"gpu_name":torch.cuda.get_device_name(0) if gpu_ok else None,"checkpoint":CHECKPOINT in models,"sd15_checkpoint":SD15_CHECKPOINT in models,"controlnet_configured":controlnet_ok,"animatediff_configured":motion_ok,"svd_configured":svd_ok,"kohya_installed":kohya_ok}
     except Exception as e: return {"status":"degraded","drive":ROOT.exists(),"comfyui":False,"error":str(e)[:180]}
 @app.post("/create_identity")
 def create_identity(data:IdentityIn):
