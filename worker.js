@@ -151,14 +151,15 @@ export default {
         } else {
           return json({ok:false,message:'Envie os dados da imagem em JSON ou multipart/form-data.'},415);
         }
-        if (!env.COLAB_MODULE2_URL) {
+        const colabImageUrl = env.COLAB_MODULE2_URL || env.COLAB_MODULE1_URL;
+        if (!colabImageUrl) {
           if (!env.AI || !contentType.includes('application/json')) return json({ok:false,message:'Para gerar sem Colab, envie o prompt em JSON e mantenha o Cloudflare AI ativo.'},503);
           const input = JSON.parse(outgoingBody);
           const generated = await env.AI.run('@cf/black-forest-labs/flux-1-schnell',{prompt:input.prompt,steps:4});
           if (!generated || !generated.image) return json({ok:false,message:'O motor de IA não devolveu uma imagem.'},502);
           return json({ok:true,status:'succeeded',imageBase64:generated.image,mimeType:'image/png',outputId:crypto.randomUUID(),engine:'cloudflare-workers-ai'});
         }
-        const imageBase = normalizeColabEndpoint(env.COLAB_MODULE2_URL || env.COLAB_MODULE1_URL);
+        const imageBase = normalizeColabEndpoint(colabImageUrl);
         const endpoint = /\/generate_image$/.test(imageBase) ? imageBase : imageBase.replace(/\/create_identity$/,'') + '/generate_image';
         const upstream = await fetch(endpoint,{method:'POST',headers,body:outgoingBody,signal:AbortSignal.timeout(120000)});
         const responseType = (upstream.headers.get('content-type') || '').toLowerCase();
