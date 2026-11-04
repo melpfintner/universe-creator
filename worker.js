@@ -379,9 +379,16 @@ document.getElementById("createForm").addEventListener("submit",async e=>{
     const data=type.includes("application/json")?await response.json():null;
     if(!response.ok||!data||data.ok!==true||!data.identityId)throw new Error(data&&data.message||"A identidade não foi registrada. Tente novamente.");
     window.__uvcIdentityId=data.identityId;
-    status.textContent="Identidade registrada com sucesso. A geração da imagem será feita pelo Módulo 2.";
-    art.replaceChildren();const confirmation=document.createElement("p");confirmation.textContent="Identidade salva. ID: "+data.identityId;art.appendChild(confirmation);
-    setStatus(data.message||"Identidade registrada e vinculada à sua sessão. Ela estará disponível para o Módulo 2.");
+    status.textContent="Identidade registrada. Iniciando a geração da imagem no ComfyUI…";
+    const imageResponse=await fetch("/api/images/generate",{method:"POST",headers:{"content-type":"application/json"},credentials:"same-origin",cache:"no-store",body:JSON.stringify({prompt,identityId:data.identityId})});
+    const imageData=await imageResponse.json().catch(()=>({}));
+    if(!imageResponse.ok||!imageData.ok||!imageData.imageBase64)throw new Error(imageData.message||"A identidade foi salva, mas o motor de imagens não devolveu uma imagem. Verifique o Módulo 2 do Colab.");
+    const binary=atob(imageData.imageBase64);const bytes=new Uint8Array(binary.length);for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);
+    generatedBlob=new Blob([bytes],{type:imageData.mimeType||"image/png"});if(generatedUrl)URL.revokeObjectURL(generatedUrl);generatedUrl=URL.createObjectURL(generatedBlob);
+    const image=document.createElement("img");image.src=generatedUrl;image.alt="Imagem gerada pelo UniVerse Creator";image.style.cssText="display:block;max-width:100%;max-height:480px;object-fit:contain;border-radius:12px";
+    art.replaceChildren(image);document.getElementById("download").disabled=false;document.getElementById("saveInfluencer").disabled=false;
+    status.textContent="Imagem gerada com sucesso pelo ComfyUI e salva no Google Drive.";
+    setStatus("Identidade registrada e imagem gerada. ID: "+data.identityId);
   }catch(err){promptField.value=prompt;art.replaceChildren();const note=document.createElement("p");note.textContent=err.message||"Não foi possível gerar a influencer.";art.appendChild(note);setStatus(note.textContent,true);status.textContent="Nenhuma identidade foi criada. Seu prompt foi mantido para nova tentativa.";}
   finally{if(!promptField.value.trim())promptField.value=prompt;submit.disabled=false;submit.textContent=location.pathname.endsWith("/identity")?"Gerar minha identidade":"Gerar influencer";}
 });
