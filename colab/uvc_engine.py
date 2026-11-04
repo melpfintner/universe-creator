@@ -71,7 +71,7 @@ def build_image_workflow(req,control_name=None,reference_name=None):
     if req.lora:
         lora_path=LORAS/(Path(req.lora).name)
         if not lora_path.exists(): raise HTTPException(404,"LoRA solicitado não encontrado no Drive.")
-        wf["8"]={"class_type":"LoraLoader","inputs":{"model":["1",0],"clip":["1",1]," lora_name":lora_path.name,"strength_model":0.8,"strength_clip":0.8}}
+        wf["8"]={"class_type":"LoraLoader","inputs":{"model":["1",0],"clip":["1",1],"lora_name":lora_path.name,"strength_model":0.8,"strength_clip":0.8}}
         wf["2"]["inputs"]["clip"]=["8",1]; wf["3"]["inputs"]["clip"]=["8",1]; wf["5"]["inputs"]["model"]=["8",0]
     if req.controlnet:
         if not CONTROLNET: raise HTTPException(503,"Defina COMFYUI_CONTROLNET com o nome do modelo ControlNet instalado.")
@@ -169,7 +169,7 @@ def generate_video(payload:dict):
         wf={
           "1":{"class_type":"ImageOnlyCheckpointLoader","inputs":{"ckpt_name":SVD_CHECKPOINT}},
           "2":{"class_type":"LoadImage","inputs":{"image":image_name}},
-          "3":{"class_type":" SVD_img2vid_Conditioning","inputs":{"clip_vision":["1",1],"init_image":["2",0],"vae":["1",2],"width":int(payload.get("width",1024)),"height":int(payload.get("height",576)),"video_frames":int(payload.get("frames",25))," motion_bucket_id":int(payload.get("motionBucketId",127)),"fps":int(payload.get("fps",6)),"augmentation_level":0.0}},
+          "3":{"class_type":"SVD_img2vid_Conditioning","inputs":{"clip_vision":["1",1],"init_image":["2",0],"vae":["1",2],"width":int(payload.get("width",1024)),"height":int(payload.get("height",576)),"video_frames":int(payload.get("frames",25)),"motion_bucket_id":int(payload.get("motionBucketId",127)),"fps":int(payload.get("fps",6)),"augmentation_level":0.0}},
           "4":{"class_type":"KSampler","inputs":{"seed":int(payload.get("seed",42)),"steps":20,"cfg":2.5,"sampler_name":"euler","scheduler":"karras","denoise":1.0,"model":["1",0],"positive":["3",0],"negative":["3",1],"latent_image":["3",2]}},
           "5":{"class_type":"VAEDecode","inputs":{"samples":["4",0],"vae":["1",2]}},
           "6":{"class_type":"VHS_VideoCombine","inputs":{"images":["5",0],"frame_rate":int(payload.get("fps",6)),"loop_count":0,"filename_prefix":"uvc_svd","format":"video/h264-mp4","pingpong":False,"save_output":True}}
