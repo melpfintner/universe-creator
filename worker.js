@@ -275,7 +275,7 @@ export default {
       }
     }
     if (url.pathname === '/api/videos/link/generate' && request.method === 'POST') {
-      if (!env.POLLO_API_KEY) return json({ok:false,message:'Falta configurar o segredo POLLO_API_KEY no Cloudflare para gerar vídeos reais.'},503);
+      if (!env.COLAB_MODULE1_URL) return json({ok:false,message:'Conecte o runtime GPU do Colab para gerar vídeos com ComfyUI e AnimateDiff.'},503);
       let body;
       try { body = await request.json(); } catch { return json({ok:false,message:'Envie um link válido do produto.'},400); }
       let productUrl;
@@ -286,53 +286,60 @@ export default {
         const page = await fetch(productUrl.href,{headers:{'user-agent':'Mozilla/5.0 (compatible; UniVerseCreator/1.0)','accept':'text/html,application/xhtml+xml'},redirect:'follow'});
         if (!page.ok) return json({ok:false,message:'A página do produto bloqueou a leitura automática. Use o link público direto da página do produto.'},422);
         pageUrl = page.url || pageUrl;
-        const type = page.headers.get('content-type') || '';
-        if (!type.includes('text/html')) return json({ok:false,message:'O link não abriu uma página de produto legível. Cole o link da página do produto, não um link de checkout.'},422);
+        if (!(page.headers.get('content-type') || '').includes('text/html')) return json({ok:false,message:'O link não abriu uma página de produto legível.'},422);
         const html = (await page.text()).slice(0,1500000);
         const meta = (key) => {
-          const tags = html.match(/<meta\b[^>]*>/gi) || [];
+          const tags = html.match(/<meta\\b[^>]*>/gi) || [];
           for (const tag of tags) {
             const attrs = {};
-            tag.replace(/([^\s=]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/g, (_, name, doubleQuoted, singleQuoted, unquoted) => { attrs[name.toLowerCase()] = doubleQuoted ?? singleQuoted ?? unquoted ?? ''; return ''; });
+            tag.replace(/([^\\s=]+)\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))/g, (_, name, dq, sq, uq) => { attrs[name.toLowerCase()] = dq ?? sq ?? uq ?? ''; return ''; });
             if (String(attrs.property || attrs.name || '').toLowerCase() === key.toLowerCase()) return String(attrs.content || '').replace(/&amp;/g,'&').replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>').trim();
           }
           return '';
         };
-        title = meta('og:title') || meta('twitter:title') || ((html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)||[])[1]||'').replace(/<[^>]+>/g,' ').trim();
+        title = meta('og:title') || meta('twitter:title') || ((html.match(/<title[^>]*>([\\s\\S]*?)<\\/title>/i)||[])[1]||'').replace(/<[^>]+>/g,' ').trim();
         description = meta('og:description') || meta('description') || meta('twitter:description');
         imageUrl = meta('og:image') || meta('twitter:image');
         if (imageUrl) { try { imageUrl = new URL(imageUrl,pageUrl).href; if (!['http:','https:'].includes(new URL(imageUrl).protocol)) imageUrl=''; } catch { imageUrl=''; } }
-      } catch (e) { return json({ok:false,message:'Não consegui ler esse link automaticamente. Tente o link público completo do produto.'},422); }
-      if (!title && !description && !imageUrl) return json({ok:false,message:'A loja não disponibilizou título, descrição ou imagem publicamente. Tente o link compartilhável direto do produto.'},422);
-      const count = Math.max(1,Math.min(5,Number(body.count)||1));
-      const voice = body.voice === 'none' ? false : body.voice === 'influencer';
-      const productFacts = [title,description].filter(Boolean).join('. ').slice(0,1000);
-      const prompt = 'Create a realistic vertical social-commerce product video in a natural creator/UGC style, 9:16. Product information verified from the product page: '+productFacts+'. Show the product clearly and attractively, realistic lighting, believable camera movement, polished but natural commercial look. Do not invent brand names, prices, product features, discounts, claims, text overlays, or logos that are not visible in the provided product reference. Focus on the actual product reference image when provided. No collage.';
-      const input = {prompt,duration:5,resolution:'720p',aspectRatio:'9:16',generateAudio:voice};
-      if (imageUrl) input.image = imageUrl;
-      const endpoint = imageUrl ? 'https://pollo.ai/api/platform/v1/generation/pollo-ai/pollo-v2/video' : 'https://pollo.ai/api/platform/v1/generation/pollo-ai/pollo-v2/video';
+      } catch { return json({ok:false,message:'Não consegui ler esse link automaticamente. Tente o link público completo do produto.'},422); }
+      if (!imageUrl) return json({ok:false,message:'A página não disponibilizou uma foto pública do produto. Envie um link que tenha imagem principal (og:image).'},422);
+      let imageData;
       try {
-        const generated = await fetch(endpoint,{method:'POST',headers:{'content-type':'application/json','x-api-key':env.POLLO_API_KEY},body:JSON.stringify({input})});
-        const data = await generated.json().catch(()=>({}));
-        if (!generated.ok || !data.taskId) return json({ok:false,message:generated.status===401||generated.status===403?'A chave POLLO_API_KEY é inválida ou não tem acesso à geração de vídeo. Confira a chave da API no Cloudflare.':'O provedor de vídeo não aceitou a solicitação. '+String(data.message||data.error||('HTTP '+generated.status)).slice(0,240)},502);
-        return json({ok:true,taskId:data.taskId,title:title||'Produto',description:description||'',imageUrl,requestedCount:count,model:'pollo-v2'});
-      } catch { return json({ok:false,message:'Não foi possível conectar ao provedor de vídeo. Tente novamente em instantes.'},502); }
+        const imageResponse = await fetch(imageUrl,{headers:{'user-agent':'Mozilla/5.0','accept':'image/avif,image/webp,image/png,image/jpeg'},redirect:'follow'});
+        const imageType = (imageResponse.headers.get('content-type')||'').split(';')[0].toLowerCase();
+        if (!imageResponse.ok || !['image/jpeg','image/png','image/webp'].includes(imageType)) return json({ok:false,message:'Não foi possível baixar a foto principal do produto. Use uma página com imagem JPG, PNG ou WEBP pública.'},422);
+        const bytes = new Uint8Array(await imageResponse.arrayBuffer());
+        if (!bytes.length || bytes.length > 5*1024*1024) return json({ok:false,message:'A imagem do produto precisa ter até 5 MB.'},413);
+        let binary=''; for(let i=0;i<bytes.length;i+=0x8000) binary+=String.fromCharCode(...bytes.subarray(i,i+0x8000));
+        imageData='data:'+imageType+';base64,'+btoa(binary);
+      } catch { return json({ok:false,message:'Não consegui baixar a imagem do produto para o motor ComfyUI.'},422); }
+      const facts=[title,description].filter(Boolean).join('. ').slice(0,1000);
+      const prompt='Create a realistic vertical 9:16 UGC product video. Product facts: '+facts+'. Preserve the exact product, packaging, colors and visible branding from the input image. Add subtle natural camera movement and premium realistic lighting. Do not invent claims, prices, discounts, labels or logos. Keep the product clearly recognizable.';
+      try {
+        const base=normalizeColabEndpoint(env.COLAB_MODULE1_URL).replace(/\\/(create_identity|generate_image)$/,'');
+        const headers={'content-type':'application/json','accept':'application/json'};
+        if(env.COLAB_API_TOKEN) headers.authorization='Bearer '+env.COLAB_API_TOKEN;
+        const upstream=await fetch(base+'/generate_video_job',{method:'POST',headers,body:JSON.stringify({image:imageData,prompt,frames:16,fps:8,width:512,height:768}),signal:AbortSignal.timeout(30000)});
+        const data=await upstream.json().catch(()=>({}));
+        if(!upstream.ok||!data.taskId) return json({ok:false,message:String(data.detail||data.message||'O motor ComfyUI não aceitou a geração. Confira se o Colab está ativo e atualizado.').slice(0,300)},502);
+        return json({ok:true,taskId:data.taskId,title:title||'Produto',description,requestedCount:1,model:'ComfyUI AnimateDiff',engine:'ComfyUI'});
+      } catch { return json({ok:false,message:'Não foi possível conectar ao ComfyUI no Colab. Verifique se o runtime GPU está ativo.'},502); }
     }
     if (url.pathname === '/api/videos/link/status' && request.method === 'GET') {
-      if (!env.POLLO_API_KEY) return json({ok:false,message:'Falta configurar o segredo POLLO_API_KEY no Cloudflare.'},503);
-      const taskId = url.searchParams.get('taskId') || '';
-      if (!/^[-_a-zA-Z0-9]{6,160}$/.test(taskId)) return json({ok:false,message:'Identificador de geração inválido.'},400);
+      const taskId=url.searchParams.get('taskId')||'';
+      if(!/^[a-f0-9]{32}$/.test(taskId)) return json({ok:false,message:'Identificador de geração inválido.'},400);
+      if(!env.COLAB_MODULE1_URL) return json({ok:false,message:'O runtime GPU do Colab não está conectado.'},503);
       try {
-        const response = await fetch('https://pollo.ai/api/platform/v1/generation/'+encodeURIComponent(taskId)+'/status',{headers:{'x-api-key':env.POLLO_API_KEY}});
-        const data = await response.json().catch(()=>({}));
-        if (!response.ok) return json({ok:false,message:'Não foi possível consultar a geração: '+String(data.message||data.error||('HTTP '+response.status)).slice(0,220)},502);
-        const generations = Array.isArray(data.generations)?data.generations:[];
-        const finished = generations.find(x=>x.status==='succeeded'&&x.url);
-        const failed = generations.find(x=>x.status==='failed');
-        if (finished) return json({ok:true,status:'succeeded',videoUrl:finished.url,mediaType:finished.mediaType||'video'});
-        if (failed || data.status==='failed') return json({ok:false,status:'failed',message:String((failed&&failed.failMsg)||data.failMsg||'O provedor não conseguiu gerar este vídeo.')});
-        return json({ok:true,status:data.status||'processing'});
-      } catch { return json({ok:false,message:'Falha ao consultar o status do vídeo.'},502); }
+        const base=normalizeColabEndpoint(env.COLAB_MODULE1_URL).replace(/\\/(create_identity|generate_image)$/,'');
+        const headers={'accept':'application/json'};
+        if(env.COLAB_API_TOKEN) headers.authorization='Bearer '+env.COLAB_API_TOKEN;
+        const response=await fetch(base+'/generate_video_job/'+encodeURIComponent(taskId),{headers,signal:AbortSignal.timeout(20000)});
+        const data=await response.json().catch(()=>({}));
+        if(!response.ok) return json({ok:false,status:'failed',message:String(data.detail||'Não foi possível consultar a tarefa no Colab.').slice(0,250)},502);
+        if(data.status==='succeeded'&&data.videoBase64) return json({ok:true,status:'succeeded',videoUrl:'data:video/mp4;base64,'+data.videoBase64,mediaType:'video/mp4'});
+        if(data.status==='failed') return json({ok:false,status:'failed',message:String(data.message||'O ComfyUI não conseguiu gerar o vídeo.').slice(0,300)});
+        return json({ok:true,status:'processing'});
+      } catch { return json({ok:false,status:'failed',message:'Falha ao consultar o vídeo no Colab.'},502); }
     }
     // Ponte do Módulo 1: recebe multipart do frontend e encaminha JSON ao Colab.
     if (url.pathname === '/api/influencers/generate' && request.method === 'POST') {
