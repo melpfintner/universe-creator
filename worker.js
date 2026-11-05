@@ -305,7 +305,7 @@ export default {
         const addCandidate = (value) => { const u=resolveImage(value); if(u && !candidates.includes(u)) candidates.push(u); };
         addCandidate(meta('og:image')); addCandidate(meta('og:image:secure_url')); addCandidate(meta('twitter:image')); addCandidate(meta('twitter:image:src'));
         // Lê dados estruturados Schema.org, inclusive Product.image, mesmo sem og:image.
-        const jsonLd = html.match(/<script\\b[^>]*type=["']application\\/ld\\+json["'][^>]*>[\\s\\S]*?<\\/script>/gi) || [];
+        const jsonLd = html.match(/<script\b[^>]*type=["']application\/ld\+json["'][^>]*>[\s\S]*?<\/script>/gi) || [];
         const walkProduct = (node) => {
           if (!node || typeof node !== 'object') return;
           if (Array.isArray(node)) { for (const item of node) walkProduct(item); return; }
@@ -316,15 +316,15 @@ export default {
           }
           for (const value of Object.values(node)) if (value && typeof value === 'object') walkProduct(value);
         };
-        for (const script of jsonLd) { const raw=script.replace(/^.*?>|<\\/script>$/gis,'').trim(); try { walkProduct(JSON.parse(raw)); } catch {} }
+        for (const script of jsonLd) { const raw=script.replace(/^.*?>|<\/script>$/gis,'').trim(); try { walkProduct(JSON.parse(raw)); } catch {} }
         // Procura imagens reais no HTML e atributos de carregamento tardio, não só metadados sociais.
-        const imgTags = html.match(/<(?:img|source)\\b[^>]*>/gi) || [];
+        const imgTags = html.match(/<(?:img|source)\b[^>]*>/gi) || [];
         for (const tag of imgTags) {
           const attrs={};
-          tag.replace(/([\\w:-]+)\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))/g,(_,k,a,b,c)=>{attrs[k.toLowerCase()]=a??b??c??'';return '';});
+          tag.replace(/([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/g,(_,k,a,b,c)=>{attrs[k.toLowerCase()]=a??b??c??'';return '';});
           if (attrs.itemprop === 'image') addCandidate(attrs.content || attrs.src || attrs['data-src']);
           for (const key of ['data-zoom-image','data-large_image','data-src','data-original','data-lazy-src','src','content']) if(attrs[key]) addCandidate(attrs[key]);
-          for (const key of ['srcset','data-srcset']) if(attrs[key]) for(const entry of attrs[key].split(',')) addCandidate(entry.trim().split(/\\s+/)[0]);
+          for (const key of ['srcset','data-srcset']) if(attrs[key]) for(const entry of attrs[key].split(',')) addCandidate(entry.trim().split(/\s+/)[0]);
         }
         if (!title) title = meta('product:name') || '';
         imageUrl = candidates[0] || '';
