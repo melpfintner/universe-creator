@@ -289,15 +289,15 @@ export default {
         if (!(page.headers.get('content-type') || '').includes('text/html')) return json({ok:false,message:'O link não abriu uma página de produto legível.'},422);
         const html = (await page.text()).slice(0,1500000);
         const meta = (key) => {
-          const tags = html.match(/<meta\\b[^>]*>/gi) || [];
+          const tags = html.match(/<meta\b[^>]*>/gi) || [];
           for (const tag of tags) {
             const attrs = {};
-            tag.replace(/([^\\s=]+)\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))/g, (_, name, dq, sq, uq) => { attrs[name.toLowerCase()] = dq ?? sq ?? uq ?? ''; return ''; });
+            tag.replace(/([^\s=]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/g, (_, name, dq, sq, uq) => { attrs[name.toLowerCase()] = dq ?? sq ?? uq ?? ''; return ''; });
             if (String(attrs.property || attrs.name || '').toLowerCase() === key.toLowerCase()) return String(attrs.content || '').replace(/&amp;/g,'&').replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>').trim();
           }
           return '';
         };
-        title = meta('og:title') || meta('twitter:title') || ((html.match(/<title[^>]*>([\\s\\S]*?)<\\/title>/i)||[])[1]||'').replace(/<[^>]+>/g,' ').trim();
+        title = meta('og:title') || meta('twitter:title') || ((html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)||[])[1]||'').replace(/<[^>]+>/g,' ').trim();
         description = meta('og:description') || meta('description') || meta('twitter:description');
         imageUrl = meta('og:image') || meta('twitter:image');
         if (imageUrl) { try { imageUrl = new URL(imageUrl,pageUrl).href; if (!['http:','https:'].includes(new URL(imageUrl).protocol)) imageUrl=''; } catch { imageUrl=''; } }
