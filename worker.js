@@ -316,7 +316,7 @@ export default {
       const facts=[title,description].filter(Boolean).join('. ').slice(0,1000);
       const prompt='Create a realistic vertical 9:16 UGC product video. Product facts: '+facts+'. Preserve the exact product, packaging, colors and visible branding from the input image. Add subtle natural camera movement and premium realistic lighting. Do not invent claims, prices, discounts, labels or logos. Keep the product clearly recognizable.';
       try {
-        const base=normalizeColabEndpoint(env.COLAB_MODULE1_URL).replace(/\\/(create_identity|generate_image)$/,'');
+        const base=normalizeColabEndpoint(env.COLAB_MODULE1_URL).replace(/\/(create_identity|generate_image)$/,'');
         const headers={'content-type':'application/json','accept':'application/json'};
         if(env.COLAB_API_TOKEN) headers.authorization='Bearer '+env.COLAB_API_TOKEN;
         const upstream=await fetch(base+'/generate_video_job',{method:'POST',headers,body:JSON.stringify({image:imageData,prompt,frames:16,fps:8,width:512,height:768}),signal:AbortSignal.timeout(30000)});
@@ -330,7 +330,7 @@ export default {
       if(!/^[a-f0-9]{32}$/.test(taskId)) return json({ok:false,message:'Identificador de geração inválido.'},400);
       if(!env.COLAB_MODULE1_URL) return json({ok:false,message:'O runtime GPU do Colab não está conectado.'},503);
       try {
-        const base=normalizeColabEndpoint(env.COLAB_MODULE1_URL).replace(/\\/(create_identity|generate_image)$/,'');
+        const base=normalizeColabEndpoint(env.COLAB_MODULE1_URL).replace(/\/(create_identity|generate_image)$/,'');
         const headers={'accept':'application/json'};
         if(env.COLAB_API_TOKEN) headers.authorization='Bearer '+env.COLAB_API_TOKEN;
         const response=await fetch(base+'/generate_video_job/'+encodeURIComponent(taskId),{headers,signal:AbortSignal.timeout(20000)});
