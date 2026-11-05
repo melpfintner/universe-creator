@@ -299,20 +299,51 @@ export default {
         };
         title = meta('og:title') || meta('twitter:title') || ((html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)||[])[1]||'').replace(/<[^>]+>/g,' ').trim();
         description = meta('og:description') || meta('description') || meta('twitter:description');
-        imageUrl = meta('og:image') || meta('twitter:image');
-        if (imageUrl) { try { imageUrl = new URL(imageUrl,pageUrl).href; if (!['http:','https:'].includes(new URL(imageUrl).protocol)) imageUrl=''; } catch { imageUrl=''; } }
-      } catch { return json({ok:false,message:'Não consegui ler esse link automaticamente. Tente o link público completo do produto.'},422); }
-      if (!imageUrl) return json({ok:false,message:'A página não disponibilizou uma foto pública do produto. Envie um link que tenha imagem principal (og:image).'},422);
-      let imageData;
-      try {
-        const imageResponse = await fetch(imageUrl,{headers:{'user-agent':'Mozilla/5.0','accept':'image/avif,image/webp,image/png,image/jpeg'},redirect:'follow'});
-        const imageType = (imageResponse.headers.get('content-type')||'').split(';')[0].toLowerCase();
-        if (!imageResponse.ok || !['image/jpeg','image/png','image/webp'].includes(imageType)) return json({ok:false,message:'Não foi possível baixar a foto principal do produto. Use uma página com imagem JPG, PNG ou WEBP pública.'},422);
-        const bytes = new Uint8Array(await imageResponse.arrayBuffer());
-        if (!bytes.length || bytes.length > 5*1024*1024) return json({ok:false,message:'A imagem do produto precisa ter até 5 MB.'},413);
-        let binary=''; for(let i=0;i<bytes.length;i+=0x8000) binary+=String.fromCharCode(...bytes.subarray(i,i+0x8000));
-        imageData='data:'+imageType+';base64,'+btoa(binary);
-      } catch { return json({ok:false,message:'Não consegui baixar a imagem do produto para o motor ComfyUI.'},422); }
+        const decode = (value) => String(value || '').replace(/&amp;/g,'&').replace(/&quot;/g,'"').replace(/&#39;|&#x27;/gi,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>').trim();
+        const resolveImage = (value) => { try { const u = new URL(decode(value),pageUrl); return ['http:','https:'].includes(u.protocol) ? u.href : ''; } catch { return ''; } };
+        const candidates = [];
+        const addCandidate = (value) => { const u=resolveImage(value); if(u && !candidates.includes(u)) candidates.push(u); };
+        addCandidate(meta('og:image')); addCandidate(meta('og:image:secure_url')); addCandidate(meta('twitter:image')); addCandidate(meta('twitter:image:src'));
+        // Lê dados estruturados Schema.org, inclusive Product.image, mesmo sem og:image.
+        const jsonLd = html.match(/<script\\b[^>]*type=["']application\\/ld\\+json["'][^>]*>[\\s\\S]*?<\\/script>/gi) || [];
+        const walkProduct = (node) => {
+          if (!node || typeof node !== 'object') return;
+          if (Array.isArray(node)) { for (const item of node) walkProduct(item); return; }
+          const types = Array.isArray(node['@type']) ? node['@type'] : [node['@type']];
+          if (types.some(t => /product/i.test(String(t)))) {
+            const imgs = Array.isArray(node.image) ? node.image : [node.image];
+            for (const im of imgs) addCandidate(typeof im === 'string' ? im : im && (im.url || im.contentUrl));
+          }
+          for (const value of Object.values(node)) if (value && typeof value === 'object') walkProduct(value);
+        };
+        for (const script of jsonLd) { const raw=script.replace(/^.*?>|<\\/script>$/gis,'').trim(); try { walkProduct(JSON.parse(raw)); } catch {} }
+        // Procura imagens reais no HTML e atributos de carregamento tardio, não só metadados sociais.
+        const imgTags = html.match(/<(?:img|source)\\b[^>]*>/gi) || [];
+        for (const tag of imgTags) {
+          const attrs={};
+          tag.replace(/([\\w:-]+)\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))/g,(_,k,a,b,c)=>{attrs[k.toLowerCase()]=a??b??c??'';return '';});
+          if (attrs.itemprop === 'image') addCandidate(attrs.content || attrs.src || attrs['data-src']);
+          for (const key of ['data-zoom-image','data-large_image','data-src','data-original','data-lazy-src','src','content']) if(attrs[key]) addCandidate(attrs[key]);
+          for (const key of ['srcset','data-srcset']) if(attrs[key]) for(const entry of attrs[key].split(',')) addCandidate(entry.trim().split(/\\s+/)[0]);
+        }
+        if (!title) title = meta('product:name') || '';
+        imageUrl = candidates[0] || '';
+      } catch { return json({ok:false,message:'Não consegui ler o conteúdo dessa página. Ela pode exigir login ou bloquear acesso automático.'},422); }
+      let imageData='', imageError='Nenhuma imagem pública foi encontrada no conteúdo da página.';
+      // Tenta cada imagem encontrada até localizar uma foto acessível do produto.
+      for (const candidate of candidates) {
+        try {
+          const imageResponse = await fetch(candidate,{headers:{'user-agent':'Mozilla/5.0 (compatible; UniVerseCreator/1.0)','accept':'image/avif,image/webp,image/png,image/jpeg'},redirect:'follow'});
+          if (!imageResponse.ok) { imageError='As imagens encontradas bloquearam o acesso automático.'; continue; }
+          const imageType=(imageResponse.headers.get('content-type')||'').split(';')[0].toLowerCase();
+          if (!['image/jpeg','image/png','image/webp'].includes(imageType)) { imageError='As imagens encontradas não foram entregues em formato JPG, PNG ou WEBP.'; continue; }
+          const bytes=new Uint8Array(await imageResponse.arrayBuffer());
+          if (!bytes.length || bytes.length>5*1024*1024) { imageError='A imagem encontrada ultrapassa o limite de 5 MB.'; continue; }
+          let binary=''; for(let i=0;i<bytes.length;i+=0x8000) binary+=String.fromCharCode(...bytes.subarray(i,i+0x8000));
+          imageData='data:'+imageType+';base64,'+btoa(binary); imageUrl=candidate; break;
+        } catch { imageError='Não foi possível baixar as imagens encontradas nessa página.'; }
+      }
+      if (!imageData) return json({ok:false,message:imageError+' O módulo procurou metadados, dados estruturados e imagens no HTML. Se o site carrega a foto somente por JavaScript ou exige login, será necessário um leitor de página compatível.'},422);
       const facts=[title,description].filter(Boolean).join('. ').slice(0,1000);
       const prompt='Create a realistic vertical 9:16 UGC product video. Product facts: '+facts+'. Preserve the exact product, packaging, colors and visible branding from the input image. Add subtle natural camera movement and premium realistic lighting. Do not invent claims, prices, discounts, labels or logos. Keep the product clearly recognizable.';
       try {
