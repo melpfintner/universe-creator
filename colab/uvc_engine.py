@@ -256,6 +256,62 @@ def train_status(identity_id:str):
         status="failed"
     return {"ok":True,"status":status,"loraReady":bool(ready),"files":[p.name for p in ready],"images":job.get("images"),"epochs":job.get("epochs"),"logTail":tail}
     
+
+video_jobs={}
+def _run_product_video(job_id,payload):
+    job=video_jobs[job_id]
+    try:
+        raw=decode_data_url(payload.get("image",""))
+        image_name=comfy_upload(raw,"uvc_product_reference.png")
+        prompt=str(payload.get("prompt") or "A realistic premium product commercial, natural camera movement, preserve exact product design and packaging")
+        negative=str(payload.get("negativePrompt") or "changed product shape, altered logo, misspelled text, flicker, blur, deformation, extra objects")
+        width=max(512,min(768,int(payload.get("width",512))//64*64))
+        height=max(512,min(768,int(payload.get("height",768))//64*64))
+        frames=max(8,min(24,int(payload.get("frames",16))))
+        fps=max(4,min(12,int(payload.get("fps",8))))
+        seed=int(payload.get("seed",int(time.time()*1000)%2147483647))
+        wf={
+          "1":{"class_type":"CheckpointLoaderSimple","inputs":{"ckpt_name":CHECKPOINT}},
+          "2":{"class_type":"LoadImage","inputs":{"image":image_name}},
+          "3":{"class_type":"VAEEncode","inputs":{"pixels":["2",0],"vae":["1",2]}},
+          "4":{"class_type":"RepeatLatentBatch","inputs":{"samples":["3",0],"amount":frames}},
+          "5":{"class_type":"CLIPTextEncode","inputs":{"text":prompt,"clip":["1",1]}},
+          "6":{"class_type":"CLIPTextEncode","inputs":{"text":negative,"clip":["1",1]}},
+          "7":{"class_type":"ADE_AnimateDiffLoaderGen1","inputs":{"model":["1",0],"model_name":MOTION_MODULE,"beta_schedule":"autoselect"}},
+          "8":{"class_type":"KSampler","inputs":{"seed":seed,"steps":20,"cfg":6.5,"sampler_name":"euler","scheduler":"normal","denoise":0.62,"model":["7",0],"positive":["5",0],"negative":["6",0],"latent_image":["4",0]}},
+          "9":{"class_type":"VAEDecode","inputs":{"samples":["8",0],"vae":["1",2]}},
+          "10":{"class_type":"VHS_VideoCombine","inputs":{"images":["9",0],"frame_rate":fps,"loop_count":0,"filename_prefix":"uvc_product_ugc","format":"video/h264-mp4","pingpong":False,"save_output":True}}
+        }
+        _,item,pid=queue_workflow(wf,timeout=1800)
+        response=requests.get(COMFY+"/view",params=item,timeout=180)
+        response.raise_for_status()
+        video=response.content
+        oid=uuid.uuid4().hex
+        out=GENERATED/(oid+".mp4")
+        out.write_bytes(video)
+        job.update({"status":"succeeded","videoBase64":base64.b64encode(video).decode(),"mimeType":"video/mp4","outputId":oid,"drivePath":str(out),"promptId":pid,"engine":"ComfyUI AnimateDiff"})
+    except Exception as e:
+        job.update({"status":"failed","message":str(e)[:500]})
+
+@app.post("/generate_video_job")
+def generate_video_job(payload:dict):
+    if not MOTION_MODULE:
+        raise HTTPException(503,"AnimateDiff não está configurado neste runtime.")
+    if not payload.get("image"):
+        raise HTTPException(400,"A foto do produto não foi recebida.")
+    jid=uuid.uuid4().hex
+    video_jobs[jid]={"status":"processing","createdAt":time.time()}
+    thread=threading.Thread(target=_run_product_video,args=(jid,payload),daemon=True)
+    thread.start()
+    return {"ok":True,"taskId":jid,"status":"processing","engine":"ComfyUI AnimateDiff"}
+
+@app.get("/generate_video_job/{job_id}")
+def generate_video_job_status(job_id:str):
+    job=video_jobs.get(job_id)
+    if not job:
+        raise HTTPException(404,"Tarefa de vídeo não encontrada nesta sessão do Colab.")
+    return {"ok":job.get("status")!="failed","taskId":job_id,**job}
+
 @app.post("/generate_video_animatediff")
 def generate_video_animatediff(payload:dict):
     if not MOTION_MODULE: raise HTTPException(503,"AnimateDiff não está configurado. Instale o motion module SD1.5.")
