@@ -261,6 +261,12 @@ video_jobs={}
 def _run_product_video(job_id,payload):
     job=video_jobs[job_id]
     try:
+        checkpoint=Path("/content/ComfyUI/models/checkpoints")/CHECKPOINT
+        motion=Path("/content/ComfyUI/models/animatediff_models")/MOTION_MODULE
+        if not checkpoint.exists():
+            raise RuntimeError("Checkpoint SD1.5 não encontrado no runtime.")
+        if not motion.exists():
+            raise RuntimeError("Motion module AnimateDiff não encontrado no runtime.")
         raw=decode_data_url(payload.get("image",""))
         image_name=comfy_upload(raw,"uvc_product_reference.png")
         prompt=str(payload.get("prompt") or "A realistic premium product commercial, natural camera movement, preserve exact product design and packaging")
@@ -282,10 +288,9 @@ def _run_product_video(job_id,payload):
           "9":{"class_type":"VAEDecode","inputs":{"samples":["8",0],"vae":["1",2]}},
           "10":{"class_type":"VHS_VideoCombine","inputs":{"images":["9",0],"frame_rate":fps,"loop_count":0,"filename_prefix":"uvc_product_ugc","format":"video/h264-mp4","pingpong":False,"save_output":True}}
         }
-        _,item,pid=queue_workflow(wf,timeout=1800)
-        response=requests.get(COMFY+"/view",params=item,timeout=180)
-        response.raise_for_status()
-        video=response.content
+        video,item,pid=queue_workflow(wf,timeout=1800)
+        if not video or len(video)<1024:
+            raise RuntimeError("ComfyUI terminou sem retornar um arquivo de vídeo válido.")
         oid=uuid.uuid4().hex
         out=GENERATED/(oid+".mp4")
         out.write_bytes(video)
